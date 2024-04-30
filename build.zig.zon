@@ -1,0 +1,26 @@
+.{
+    .name = "zig-zraw",
+
+    .version = "0.0.0",
+
+    .minimum_zig_version = "0.12.0",
+
+    .dependencies = .{
+        // .lazy = .{
+        //     .url = "https://github.com/rueyxian/zig-lazy/archive/refs/tags/v0.0.0.tar.gz",
+        //     .hash = "1220fdb0e5eba4b1e5698b87c38e94cba7fa5dd59ce277656a49034f38db1f168ec7",
+        // },
+        .cow = .{
+            .url = "https://github.com/rueyxian/zig-cow/archive/refs/tags/v0.0.2.tar.gz",
+            .hash = "1220883d655b5cf041232626dae0508d8a75742f19c23ce7495eda7294f6b146061e",
+        },
+        .test_zon = .{
+            .url = "https://github.com/rueyxian/test-zon/archive/refs/tags/v0.0.9.tar.gz",
+            .hash = "1220c18158ad9568f04a3af2c8a768d2e6cdf845f81b4afa4acf24cd3672f796de28",
+        },
+    },
+
+    .paths = .{
+        "",
+    },
+}
