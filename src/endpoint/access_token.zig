@@ -2,12 +2,12 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Method = std.http.Method;
 
-const domain_www = @import("../api.zig").domain_www;
+const domain_www = @import("../endpoint.zig").domain_www;
 
 pub const AccessToken = struct {
     pub const endpoint = domain_www ++ "api/v1/access_token";
     pub const method: Method = .POST;
-    pub const Payload = struct {
+    pub const Model = struct {
         access_token: []const u8,
         token_type: []const u8,
         expires_in: u64,

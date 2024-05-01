@@ -13,7 +13,7 @@ const Decoder = std.base64.standard.Decoder;
 const CowBytes = @import("cow_bytes.zig").CowBytes;
 
 const AccessToken = @import("api/access_token.zig").AccessToken;
-const New = @import("api/listings.zig").New;
+const New = @import("api/listing.zig").New;
 
 const Number = u64;
 

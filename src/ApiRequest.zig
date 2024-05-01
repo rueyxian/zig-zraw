@@ -1,9 +1,11 @@
 const std = @import("std");
 const json = std.json;
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const Client = std.http.Client;
 const Method = std.http.Method;
 const ResponseStorage = std.http.Client.FetchOptions.ResponseStorage;
+const Parsed = std.json.Parsed;
 
 pub const Error = error{
     HttpResponse,
@@ -33,7 +35,7 @@ pub const ApiResponse = struct {
         self.owned = true;
     }
 
-    pub fn parse(self: *const ApiResponse, comptime Struct: type, allocator: Allocator) !Struct {
+    pub fn parse(self: *const ApiResponse, comptime Model: type, allocator: Allocator) !Parsed(Model) {
         // const parsed = try json.parseFromSlice(PayloadType, allocator, self.body, .{});
         // defer parsed.deinit();
         // var response: PayloadType = undefined;
@@ -48,9 +50,7 @@ pub const ApiResponse = struct {
         // }
         // return response;
 
-        const parsed = try json.parseFromSlice(Struct, allocator, self.payload, .{});
-        defer parsed.deinit();
-        return parsed.value;
+        return try json.parseFromSlice(Model, allocator, self.payload, .{});
     }
 };
 

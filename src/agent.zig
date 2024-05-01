@@ -5,13 +5,19 @@ const fmt = std.fmt;
 const Allocator = std.mem.Allocator;
 const Client = std.http.Client;
 const Headers = std.http.Headers;
+const Parsed = std.json.Parsed;
 
-const AccessToken = @import("api/access_token.zig").AccessToken;
+const AccessToken = @import("endpoint/access_token.zig").AccessToken;
 const ApiRequest = @import("ApiRequest.zig");
 const ApiResponse = ApiRequest.ApiResponse;
-const api = @import("api.zig");
+const getEndpoint = @import("endpoint.zig").getEndpoint;
+// const api = @import("endpoint.zig");
 
-pub const Number = u64;
+pub const Bool = bool;
+pub const Integer = i64;
+pub const Float = f64;
+pub const String = []const u8;
+// pub const
 
 pub const Config = struct {
     thread_safe: bool = !@import("builtin").single_threaded,
@@ -26,39 +32,37 @@ pub const AuthorizationOptions = struct {
     user_pass: []const u8,
 };
 
-const Authorization = struct {
+pub const Authorization = struct {
     authorization: []const u8,
 
     pub const Self = @This();
 
     pub fn fetch(allocator: Allocator, options: AuthorizationOptions) !Self {
-        // const buffer: [1 << 14]u8 = undefined;
-        // var fba = std.heap.FixedBufferAllocator.init(&buffer);
-
-        // TODO continue here
+        var buffer: [1 << 14]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        const fballoc = fba.allocator();
 
         var client = Client{ .allocator = allocator };
         defer client.deinit();
 
-        var response_buffer: [1 << 10]u8 = undefined;
-
         const response = blk: {
             const basic_auth = bauth: {
                 const Base64Encoder = std.base64.standard.Encoder;
-                const src = try fmt.allocPrint(allocator, "{s}:{s}", .{ options.app_id, options.app_pass });
-                defer allocator.free(src);
-                const encoded = try allocator.alloc(u8, Base64Encoder.calcSize(src.len));
-                defer allocator.free(encoded);
+                const src = try fmt.allocPrint(fballoc, "{s}:{s}", .{ options.app_id, options.app_pass });
+                defer fballoc.free(src);
+                const encoded = try fballoc.alloc(u8, Base64Encoder.calcSize(src.len));
+                defer fballoc.free(encoded);
                 _ = Base64Encoder.encode(encoded, src);
-                break :bauth try fmt.allocPrint(allocator, "Basic {s}", .{encoded});
+                break :bauth try fmt.allocPrint(fballoc, "Basic {s}", .{encoded});
             };
-            defer allocator.free(basic_auth);
+            defer fballoc.free(basic_auth);
 
-            const requ_payload = try fmt.allocPrint(allocator, "grant_type=password&username={s}&password={s}", .{ options.user_id, options.user_pass });
-            defer allocator.free(requ_payload);
+            const requ_payload = try fmt.allocPrint(fballoc, "grant_type=password&username={s}&password={s}", .{ options.user_id, options.user_pass });
+            defer fballoc.free(requ_payload);
 
-            const endpoint = try api.Endpoint.parse(allocator, AccessToken{});
-            defer endpoint.deinit(allocator);
+            // const endpoint = try api.Endpoint.parse(fballoc, AccessToken{});
+            const endpoint = try getEndpoint(fballoc, AccessToken{});
+            defer endpoint.deinit(fballoc);
 
             const request = ApiRequest{
                 .uri = endpoint.url.bytes,
@@ -67,11 +71,14 @@ const Authorization = struct {
                 .authorization = basic_auth,
                 .payload = requ_payload,
             };
-            break :blk try request.fetch(&client, .{ .static = &response_buffer });
-        };
-        const payload = try response.parse(AccessToken.Payload, allocator);
+            // break :blk try request.fetch(&client, .{ .static = &response_buffer });
 
-        const authorization = try fmt.allocPrint(allocator, "{s} {s}", .{ payload.token_type, payload.access_token });
+            var response_buffer = std.ArrayList(u8).init(fballoc);
+            break :blk try request.fetch(&client, .{ .dynamic = &response_buffer });
+        };
+        const parsed = try response.parse(AccessToken.Model, fballoc);
+        defer parsed.deinit();
+        const authorization = try fmt.allocPrint(allocator, "{s} {s}", .{ parsed.value.token_type, parsed.value.access_token });
         return Self{ .authorization = authorization };
     }
 
@@ -91,7 +98,7 @@ const Authorization = struct {
     }
 };
 
-const Agent = struct {
+pub const Agent = struct {
     user_agent: []const u8,
     authorization: []const u8,
     client: Client,
@@ -104,7 +111,39 @@ const Agent = struct {
         self.client.deinit();
     }
 
-    pub fn fetch(self: *Self, endpoint: api.Endpoint) !ApiResponse {
+    // pub fn fetch(self: *Self, allocator: Allocator, api_context: anytype) !Parsed(@TypeOf(api_context).Model) {
+    //     return self.fetchModelWithContext(@TypeOf(api_context).Model, allocator, api_context);
+    // }
+
+    fn verifyEndpoint(EndpointType: type) bool {
+        const info = @typeInfo(EndpointType);
+        debug.assert(info == .Struct);
+
+        const fields = info.Struct.fields;
+        const field_url = fields[0];
+        _ = field_url; // autofix
+        const field_method = fields[1];
+        _ = field_method; // autofix
+        // if (fields[0].  )
+
+        // if (field_url.name != "url" or field_url.type )
+
+    }
+
+    pub fn fetch(self: *Self, allocator: Allocator, endpoint: anytype) !Parsed(@TypeOf(endpoint).Model) {
+        const response = try self.fetchRaw(endpoint);
+        return try json.parseFromSlice(@TypeOf(endpoint).Model, allocator, response.payload, .{
+            .ignore_unknown_fields = true,
+        });
+    }
+
+    pub fn fetchWithContext(self: *Self, allocator: Allocator, context: anytype) !Parsed(@TypeOf(context).Model) {
+        const endpoint = try getEndpoint(@TypeOf(context).Model).parse(allocator, context);
+        defer endpoint.deinit(allocator);
+        return self.fetch(endpoint);
+    }
+
+    pub fn fetchRaw(self: *Self, endpoint: anytype) !ApiResponse {
         self.response_buffer.clearRetainingCapacity();
         const request = ApiRequest{
             .uri = endpoint.url.bytes,
@@ -116,11 +155,17 @@ const Agent = struct {
         return request.fetch(&self.client, .{ .dynamic = &self.response_buffer });
     }
 
-    pub fn fetchWithContext(self: *Self, allocator: Allocator, api_context: anytype) !ApiResponse {
-        const endpoint = try api.Endpoint.parse(allocator, api_context);
+    pub fn fetchRawWithContext(self: *Self, allocator: Allocator, context: anytype) !ApiResponse {
+        const endpoint = try getEndpoint(@TypeOf(context).Model).parse(allocator, context);
         defer endpoint.deinit(allocator);
-        return self.fetch(endpoint);
+        return self.fetchRaw(endpoint);
     }
+
+    // pub fn fetchModelWithContext(self: *Self, comptime Model: type, allocator: Allocator, api_context: anytype) !Parsed(Model) {
+    //     const endpoint = try api.Endpoint.parse(allocator, api_context);
+    //     defer endpoint.deinit(allocator);
+    //     return self.fetchModel(Model, allocator, endpoint);
+    // }
 };
 
 const print = std.debug.print;
@@ -129,6 +174,8 @@ const testOptions = @import("util.zig").testOptions;
 const TestOptions = @import("util.zig").TestOptions;
 
 test "auth" {
+    // if (true) return error.SkipZigTest;
+
     const testopts: TestOptions = testOptions() orelse return error.SkipZigTest;
 
     const allocator = std.testing.allocator;
@@ -152,21 +199,82 @@ test "auth" {
     defer agent.deinit();
 
     {
-        const New = @import("api/listings.zig").New;
-        const res = try agent.fetchWithContext(allocator, New("zig"){
-            .count = 2,
-        });
-        defer res.deinit(allocator);
+        const New = @import("endpoint/listing.zig").New;
+        // const res = try agent.fetchRawWithContext(allocator, New("zig"){
+        //     .count = 2,
+        // });
+        // defer res.deinit(allocator);
 
-        print("{s}\n", .{res.payload});
+        // print("{s}\n", .{res.payload});
+
+        // const model = try agent.fetch(allocator, New("zig"){
+        //     .count = 2,
+        // });
+
+        // const children = model.data.children;
+        // const x = children[0].data;
+
+        // const model = try agent.fetchModelWithContext(New("zig").Model, allocator, New("zig"){
+        //     .count = 3,
+        // });
+
+        const Context = New("zig");
+
+        // const parsed = try agent.fetchModelWithContext(Context, allocator, Context{
+        //     .count = 3,
+        // });
+        // defer parsed.deinit();
+
+        // const endpoint = api.Endpoint.parsed(Context{
+        //     .count = 3,
+        // });
+
+        const endpoint = try getEndpoint(allocator, Context{
+            .count = 3,
+        });
+        defer endpoint.deinit(allocator);
+
+        // const context = Context{ .count = 3 }.toEndpoint();
+
+        const parsed = try agent.fetch(allocator, endpoint);
+        defer parsed.deinit();
+
+        // print("{any}\n", .{x.id});
+
+        // ================
+
+        // const parsed = try json.parseFromSlice(GenericPayload(ListingPayload), allocator, res.payload, .{
+        //     .ignore_unknown_fields = true,
+        // });
+        // print("{any}\n", .{parsed.value});
+
+        // ================
+
+        // const Value = std.json.Value;
+        // const parsed = try json.parseFromSlice(Value, allocator, res.payload, .{
+        //     .ignore_unknown_fields = true,
+        // });
+
+        // const root = parsed.value;
+
+        // const kind = root.object.get("kind").?.string;
+        // print("kind: {s}\n", .{kind});
+
+        // const data = root.object.get("data").?.object;
+        // print("data: {any}\n", .{data});
+
+        // const selftext = root.object.get("selftext").?;
+
+        // print("{any}\n", .{root.object});
+        // print("{any}\n", .{@TypeOf(root.o)});
     }
 
     {
-        const Me = @import("api/account.zig").Me;
-        const res = try agent.fetchWithContext(allocator, Me{});
-        defer res.deinit(allocator);
+        // const Me = @import("api/account.zig").Me;
+        // const res = try agent.fetchRawWithContext(allocator, Me{});
+        // defer res.deinit(allocator);
 
-        print("{s}\n", .{res.payload});
+        // print("{s}\n", .{res.payload});
     }
 
     // print("connection_pool used len: {}\n", .{agent.client.connection_pool.used.len});
@@ -174,3 +282,96 @@ test "auth" {
 
     // const res = try agent.fetch(allocator, );
 }
+
+const json = std.json;
+
+test "test json" {
+    if (true) return error.SkipZigTest;
+
+    print("\n", .{});
+    const allocator = std.heap.page_allocator;
+
+    const s = @embedFile("testjson/listing_new.json");
+
+    const Value = std.json.Value;
+    const parsed = try json.parseFromSlice(Value, allocator, s, .{
+        .ignore_unknown_fields = true,
+    });
+
+    const root = parsed.value;
+
+    const kind = root.object.get("kind").?.string;
+    print("kind: {s}\n", .{kind});
+
+    const data = root.object.get("data").?.object;
+    print("data: {any}\n", .{data});
+
+    // const
+    // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
+
+    // const selftext = root.object.get("selftext").?;
+}
+
+test "test json static" {
+    if (true) return error.SkipZigTest;
+
+    print("\n", .{});
+    const allocator = std.heap.page_allocator;
+
+    const s = @embedFile("testjson/listing_new.json");
+
+    const parsed = try json.parseFromSlice(GenericPayload(ListingPayload), allocator, s, .{
+        .ignore_unknown_fields = true,
+    });
+    // print("{any}\n", .{parsed.value});
+
+    const listing = parsed.value;
+
+    const children = listing.data.children;
+
+    const c0 = children[0].data;
+
+    // print("{s}\n", .{c0.url});
+    print("{s}\n", .{c0.url.?});
+    print("{s}\n", .{c0.author.?});
+    print("{s}\n", .{c0.selftext.?});
+
+    // const
+    // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
+
+    // const selftext = root.object.get("selftext").?;
+}
+
+fn testparse(comptime T: type, allocator: Allocator, s: []const u8) !T {
+    //
+    // json.parseFromTokenSource(, , , )
+    const parsed = try json.parseFromSlice(T, allocator, s, .{
+        .ignore_unknown_fields = true,
+    });
+    _ = parsed; // autofix
+}
+
+pub fn GenericPayload(comptime T: type) type {
+    return struct {
+        kind: []const u8,
+        data: T,
+    };
+}
+
+const ListingPayload = struct {
+    after: ?String,
+    dist: ?Integer,
+    modhash: ?String,
+    children: []const GenericPayload(LinkPayload),
+};
+
+const LinkPayload = struct {
+    url: ?[]const u8,
+    approved_at_utc: ?Float,
+    subreddit: ?[]const u8,
+    selftext: ?[]const u8,
+    author_fullname: ?[]const u8,
+    author: ?[]const u8,
+    saved: bool,
+    // mod_reason
+};
