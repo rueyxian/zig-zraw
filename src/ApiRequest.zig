@@ -23,6 +23,10 @@ pub const ApiResponse = struct {
     payload: []const u8,
     owned: bool,
 
+    pub const ParseError = std.json.ParseError(json.Scanner);
+
+    // pub const parseFn = fn (type, Allocator, []const u8) ParseError!Parsed()
+
     pub fn deinit(self: *const ApiResponse, allocator: Allocator) void {
         if (self.owned == false) {
             return;
@@ -35,22 +39,28 @@ pub const ApiResponse = struct {
         self.owned = true;
     }
 
-    pub fn parse(self: *const ApiResponse, comptime Model: type, allocator: Allocator) !Parsed(Model) {
-        // const parsed = try json.parseFromSlice(PayloadType, allocator, self.body, .{});
-        // defer parsed.deinit();
-        // var response: PayloadType = undefined;
-        // const info = @typeInfo(PayloadType);
-        // const fields = info.Struct.fields;
-        // inline for (fields) |field| {
-        //     @field(&response, field.name) = switch (field.type) {
-        //         []const u8 => try allocator.dupe(u8, @field(parsed.value, field.name)),
-        //         Number => @field(parsed.value, field.name),
-        //         else => unreachable,
-        //     };
-        // }
-        // return response;
+    // pub fn ParseFn(comptime T: type) ParseError!Parsed(T) {
+    //     return fn (type, Allocator, []const u8) ParseError!Parsed(T);
+    // }
 
-        return try json.parseFromSlice(Model, allocator, self.payload, .{});
+    // pub fn parse(self: *const ApiResponse, comptime T: type, allocator: Allocator, optional_parse_fn: ?ParseFn(T)) ParseError!Parsed(T) {
+    //     if (optional_parse_fn) |parse_fn| {
+    //         return try parse_fn(T, allocator, self.payload);
+    //     }
+    //     return try json.parseFromSlice(T, allocator, self.payload, .{
+    //         .ignore_unknown_fields = true,
+    //     });
+    // }
+
+    pub fn parse(self: *const ApiResponse, comptime T: type, allocator: Allocator) ParseError!Parsed(T) {
+        const _parse = @import("parser.zig").parse;
+        return _parse(T, allocator, self.payload);
+        // if (optional_parse_fn) |parse_fn| {
+        //     return try parse_fn(T, allocator, self.payload);
+        // }
+        // return try json.parseFromSlice(T, allocator, self.payload, .{
+        //     .ignore_unknown_fields = true,
+        // });
     }
 };
 

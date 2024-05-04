@@ -17,6 +17,7 @@ pub fn New(comptime subreddit: []const u8) type {
         before: ?[]const u8 = null,
         count: ?u64 = null,
         limit: ?u64 = null,
+        sr_detail: ?bool = null,
         pub const url = domain_oauth ++ "r/" ++ subreddit ++ "/new";
         pub const method = Method.GET;
         pub const Model = model.Thing(model.Listing);

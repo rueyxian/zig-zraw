@@ -4,7 +4,8 @@ const debug = std.debug;
 const Method = std.http.Method;
 const Allocator = std.mem.Allocator;
 
-const CowBytes = @import("cow_bytes.zig").CowBytes;
+// const CowBytes = @import("cow_bytes.zig").CowBytes;
+const CowString = @import("CowString.zig");
 
 pub const domain_www = "https://www.reddit.com/";
 pub const domain_oauth = "https://oauth.reddit.com/";
@@ -15,7 +16,7 @@ pub fn getEndpoint(allocator: Allocator, api_context: anytype) !Endpoint(@TypeOf
     debug.assert(info == .Struct);
     const fields = info.Struct.fields;
     if (fields.len == 0) {
-        const url = CowBytes([]const u8).borrowed(Context.endpoint);
+        const url = CowString.borrowed(Context.endpoint);
         return Endpoint(Context.Model){
             .url = url,
             .method = Context.method,
@@ -33,6 +34,7 @@ pub fn getEndpoint(allocator: Allocator, api_context: anytype) !Endpoint(@TypeOf
             try w.writeAll(field.name);
             try w.writeByte('=');
             switch (@TypeOf(val)) {
+                bool => try w.writeByte((&[_]u8{ '0', '1' })[@intFromBool(val)]),
                 []const u8 => try w.writeAll(val),
                 u64 => {
                     var _buf: [maxUintLength(u4)]u8 = undefined;
@@ -45,7 +47,7 @@ pub fn getEndpoint(allocator: Allocator, api_context: anytype) !Endpoint(@TypeOf
         }
     }
     debug.assert(try fbs.getPos() == buf.len);
-    const url = CowBytes([]const u8).owned(fbs.getWritten());
+    const url = CowString.owned(fbs.getWritten());
     return Endpoint(Context.Model){
         .url = url,
         .method = Context.method,
@@ -54,7 +56,7 @@ pub fn getEndpoint(allocator: Allocator, api_context: anytype) !Endpoint(@TypeOf
 
 pub fn Endpoint(comptime ModelType: type) type {
     return struct {
-        url: CowBytes([]const u8),
+        url: CowString,
         method: Method,
 
         pub const Self = @This();
@@ -78,6 +80,7 @@ fn fullEndpointLength(context: anytype) usize {
             res += 2; // ('?' or '&') + '='
             res += field.name.len;
             switch (@TypeOf(val)) {
+                bool => res += 1, // bool will convert to '0' or '1',
                 []const u8 => res += val.len,
                 u64 => res += uintLength(u64, val),
                 else => unreachable,

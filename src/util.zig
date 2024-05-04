@@ -1,4 +1,5 @@
 const std = @import("std");
+const debug = std.debug;
 const fs = std.fs;
 const io = std.io;
 const fmt = std.fmt;

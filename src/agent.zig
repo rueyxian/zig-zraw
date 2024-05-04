@@ -1,5 +1,6 @@
 const std = @import("std");
 const debug = std.debug;
+const mem = std.mem;
 const testing = std.testing;
 const fmt = std.fmt;
 const Allocator = std.mem.Allocator;
@@ -19,10 +20,10 @@ pub const Float = f64;
 pub const String = []const u8;
 // pub const
 
-pub const Config = struct {
-    thread_safe: bool = !@import("builtin").single_threaded,
-    MutexType: ?type = null,
-};
+// pub const Config = struct {
+//     thread_safe: bool = !@import("builtin").single_threaded,
+//     MutexType: ?type = null,
+// };
 
 pub const AuthorizationOptions = struct {
     user_agent: []const u8,
@@ -65,7 +66,7 @@ pub const Authorization = struct {
             defer endpoint.deinit(fballoc);
 
             const request = ApiRequest{
-                .uri = endpoint.url.bytes,
+                .uri = endpoint.url.value,
                 .method = endpoint.method,
                 .user_agent = options.user_agent,
                 .authorization = basic_auth,
@@ -123,10 +124,17 @@ pub const Agent = struct {
         const field_url = fields[0];
         _ = field_url; // autofix
         const field_method = fields[1];
+
         _ = field_method; // autofix
         // if (fields[0].  )
 
-        // if (field_url.name != "url" or field_url.type )
+        // if (mem.eql(u8, field_url.name, "url") or mem.eql(u8, field_url.type, "method") or field_url.type =) {
+        //     //
+        // }
+
+        // if (field_url or mem.eql(u8, field_url.type, "method")) {
+        //     //
+        // }
 
     }
 
@@ -146,7 +154,7 @@ pub const Agent = struct {
     pub fn fetchRaw(self: *Self, endpoint: anytype) !ApiResponse {
         self.response_buffer.clearRetainingCapacity();
         const request = ApiRequest{
-            .uri = endpoint.url.bytes,
+            .uri = endpoint.url.value,
             .method = endpoint.method,
             .user_agent = self.user_agent,
             .authorization = self.authorization,
@@ -174,7 +182,7 @@ const testOptions = @import("util.zig").testOptions;
 const TestOptions = @import("util.zig").TestOptions;
 
 test "auth" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     const testopts: TestOptions = testOptions() orelse return error.SkipZigTest;
 
@@ -230,9 +238,12 @@ test "auth" {
         // });
 
         const endpoint = try getEndpoint(allocator, Context{
-            .count = 3,
+            .limit = 1,
+            // .sr_detail = true,
         });
         defer endpoint.deinit(allocator);
+
+        print("{s}\n", .{endpoint.url.value});
 
         // const context = Context{ .count = 3 }.toEndpoint();
 
@@ -285,6 +296,12 @@ test "auth" {
 
 const json = std.json;
 
+const model = @import("model.zig");
+
+const Thing = model.Thing;
+const Listing = model.Listing;
+const Comment = model.Comment;
+
 test "test json" {
     if (true) return error.SkipZigTest;
 
@@ -306,6 +323,8 @@ test "test json" {
     const data = root.object.get("data").?.object;
     print("data: {any}\n", .{data});
 
+    print("type: {}", .{@TypeOf(data)});
+
     // const
     // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
 
@@ -320,7 +339,7 @@ test "test json static" {
 
     const s = @embedFile("testjson/listing_new.json");
 
-    const parsed = try json.parseFromSlice(GenericPayload(ListingPayload), allocator, s, .{
+    const parsed = try json.parseFromSlice(Thing(Listing), allocator, s, .{
         .ignore_unknown_fields = true,
     });
     // print("{any}\n", .{parsed.value});
@@ -330,11 +349,48 @@ test "test json static" {
     const children = listing.data.children;
 
     const c0 = children[0].data;
+    _ = c0; // autofix
 
     // print("{s}\n", .{c0.url});
-    print("{s}\n", .{c0.url.?});
-    print("{s}\n", .{c0.author.?});
-    print("{s}\n", .{c0.selftext.?});
+    // print("{s}\n", .{c0.url.?});
+    // print("{s}\n", .{c0.author.?});
+    // print("{s}\n", .{c0.selftext.?});
+
+    // const
+    // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
+
+    // const selftext = root.object.get("selftext").?;
+}
+
+test "test json static comment" {
+    // if (true) return error.SkipZigTest;
+
+    print("\n", .{});
+    const allocator = std.heap.page_allocator;
+
+    const s = @embedFile("testjson/comments2.json");
+
+    const Model = struct {
+        Thing(Listing),
+        Thing(Comment),
+    };
+
+    const parsed = try json.parseFromSlice(Model, allocator, s, .{
+        .ignore_unknown_fields = true,
+    });
+    // print("{any}\n", .{parsed.value});
+
+    const comments = parsed.value;
+    _ = comments; // autofix
+
+    // const children = listing.data.children;
+
+    // const c0 = children[0].data;
+
+    // print("{s}\n", .{c0.url});
+    // print("{s}\n", .{c0.url.?});
+    // print("{s}\n", .{c0.author.?});
+    // print("{s}\n", .{c0.selftext.?});
 
     // const
     // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
@@ -350,28 +406,3 @@ fn testparse(comptime T: type, allocator: Allocator, s: []const u8) !T {
     });
     _ = parsed; // autofix
 }
-
-pub fn GenericPayload(comptime T: type) type {
-    return struct {
-        kind: []const u8,
-        data: T,
-    };
-}
-
-const ListingPayload = struct {
-    after: ?String,
-    dist: ?Integer,
-    modhash: ?String,
-    children: []const GenericPayload(LinkPayload),
-};
-
-const LinkPayload = struct {
-    url: ?[]const u8,
-    approved_at_utc: ?Float,
-    subreddit: ?[]const u8,
-    selftext: ?[]const u8,
-    author_fullname: ?[]const u8,
-    author: ?[]const u8,
-    saved: bool,
-    // mod_reason
-};

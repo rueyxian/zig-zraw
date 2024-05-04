@@ -12,10 +12,18 @@ pub fn build(b: *std.Build) !void {
     //     .optimize = optimize,
     // });
 
-    const dep_cow = b.dependency("cow", .{
+    const dep_cow = b.dependencyFromBuildZig(@import("cow"), .{
         .target = target,
         .optimize = optimize,
     });
+
+    // const lazypath = dep_cow.path("cow");
+    // std.debug.print("lazypath: {s}\n", .{lazypath.getPath(b)});
+
+    // const dep_cow = b.dependency("cow", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
     const dep_test_zon = b.dependency("test_zon", .{
         .target = target,
         .optimize = optimize,
@@ -39,23 +47,6 @@ pub fn build(b: *std.Build) !void {
     _ = mod_zraw;
 
     // mod_z
-
-    // const lib_zraw = b.addStaticLibrary(.{
-    //     .name = "zraw",
-    //     .root_source_file = .{ .path = "src/root.zig" },
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // lib_zraw.root_module.addImport("test_zon", dep_test_zon.module("test_zon"));
-    // b.installArtifact(lib_zraw);
-
-    // _ = b.addModule("libduckdb.include", .{
-    //     .source_file = .{ .path = duck_dep.builder.pathFromRoot(
-    //         duck_dep.module("libduckdb.include").source_file.path,
-    //     ) },
-    // });
-
-    // try exe.addVcpkgPaths(pkgs.test_zon);
 
     const AddTest = struct {
         path: []const u8,
