@@ -11,6 +11,10 @@ const Token = std.json.Token;
 const TokenType = std.json.TokenType;
 
 // pub const Bool = bool;
+
+const model = @import("model.zig");
+const Thing = model.Thing;
+
 pub const Int = i64;
 pub const Uint = u64;
 pub const Float = f64;
@@ -23,14 +27,14 @@ pub const String = []const u8;
 
 pub const ParseError = json.ParseError(Scanner);
 
-pub fn parse(comptime T: type, allocator: Allocator, s: []const u8) ParseError!Parsed(*T) {
-    var parsed = Parsed(*T){
+pub fn parse(comptime T: type, allocator: Allocator, s: []const u8) ParseError!Parsed(T) {
+    var parsed = Parsed(T){
         .arena = try allocator.create(ArenaAllocator),
         .value = undefined,
     };
     parsed.arena.* = ArenaAllocator.init(allocator);
     var scanner = Scanner.initCompleteInput(parsed.arena.allocator(), s);
-    parsed.value = try innerParse(*T, parsed.arena, &scanner);
+    parsed.value = try innerParse(T, parsed.arena, &scanner);
     debug.assert((try scanner.next() == .end_of_document));
     return parsed;
 }
@@ -38,7 +42,7 @@ pub fn parse(comptime T: type, allocator: Allocator, s: []const u8) ParseError!P
 fn innerParse(comptime T: type, arena: *ArenaAllocator, scanner: *Scanner) ParseError!T {
     const allocator = arena.allocator();
 
-    debug.print("\nT: {any}\n", .{T});
+    // debug.print("\nT: {any}\n", .{T});
 
     switch (@typeInfo(T)) {
         .Optional => |optional_info| {
@@ -53,16 +57,12 @@ fn innerParse(comptime T: type, arena: *ArenaAllocator, scanner: *Scanner) Parse
                         else => unreachable,
                     };
                     switch (optional_info.child) {
-                        // Thing => {
-                        //     debug.assert(s.len == 0);
-                        //     return null;
-                        // },
-                        []const u8 => return s,
-                        else => {
+                        Thing => {
                             debug.assert(s.len == 0);
                             return null;
                         },
-                        // else => unreachable,
+                        []const u8 => return s,
+                        else => unreachable,
                     }
                 },
                 else => return try innerParse(optional_info.child, arena, scanner),
@@ -139,32 +139,32 @@ fn innerParse(comptime T: type, arena: *ArenaAllocator, scanner: *Scanner) Parse
                 else => unreachable,
             }
         },
-        // .Union => {
-        //     debug.assert((try scanner.next()) == .object_begin);
-        //     if (T != Thing) @panic("expect enum `Thing` only");
+        .Union => {
+            debug.assert((try scanner.next()) == .object_begin);
+            if (T != Thing) @panic("expect enum `Thing` only");
 
-        //     const kind_name = (try scanner.next()).string;
-        //     debug.assert(mem.eql(u8, kind_name, "kind"));
+            const kind_name = (try scanner.next()).string;
+            debug.assert(mem.eql(u8, kind_name, "kind"));
 
-        //     const kind_value = (try scanner.next()).string;
+            const kind_value = (try scanner.next()).string;
 
-        //     const data_name = (try scanner.next()).string;
-        //     debug.assert(mem.eql(u8, data_name, "data"));
+            const data_name = (try scanner.next()).string;
+            debug.assert(mem.eql(u8, data_name, "data"));
 
-        //     const ret: Thing = if (mem.eql(u8, kind_value, "Listing"))
-        //         .{ .listing = try innerParse(Listing, arena, scanner) }
-        //     else if (mem.eql(u8, kind_value, "more"))
-        //         .{ .more = try innerParse(More, arena, scanner) }
-        //     else if (mem.eql(u8, kind_value, "t1"))
-        //         .{ .comment = try innerParse(*Comment, arena, scanner) }
-        //     else if (mem.eql(u8, kind_value, "t3"))
-        //         .{ .link = try innerParse(Link, arena, scanner) }
-        //     else
-        //         unreachable;
+            const ret: Thing = if (mem.eql(u8, kind_value, "Listing"))
+                .{ .listing = try innerParse(Listing, arena, scanner) }
+            else if (mem.eql(u8, kind_value, "more"))
+                .{ .more = try innerParse(More, arena, scanner) }
+            else if (mem.eql(u8, kind_value, "t1"))
+                .{ .comment = try innerParse(*Comment, arena, scanner) }
+            else if (mem.eql(u8, kind_value, "t3"))
+                .{ .link = try innerParse(Link, arena, scanner) }
+            else
+                unreachable;
 
-        //     debug.assert((try scanner.next()) == .object_end);
-        //     return ret;
-        // },
+            debug.assert((try scanner.next()) == .object_end);
+            return ret;
+        },
         .Struct => |struct_info| {
             debug.assert((try scanner.next()) == .object_begin);
             debug.assert(struct_info.is_tuple == false);
@@ -180,16 +180,15 @@ fn innerParse(comptime T: type, arena: *ArenaAllocator, scanner: *Scanner) Parse
                     .object_end => break,
                     else => unreachable,
                 };
-
-                debug.print("field_name: {s}\n", .{field_name});
+                // debug.print("field_name: {s}\n", .{field_name});
 
                 inline for (fields) |field| {
                     if (field.is_comptime) @compileError("comptime fields are not supported: " ++ @typeName(T) ++ "." ++ field.name);
 
                     if (mem.eql(u8, field.name, field_name)) {
-                        debug.print("field.type: {any}\n", .{field.type});
                         const val = try innerParse(field.type, arena, scanner);
 
+                        // debug.print("field.type: {any}\n", .{field.type});
                         // switch (field.type) {
                         //     []const u8 => {
                         //         debug.print("val: {s}\n", .{val});
@@ -214,7 +213,6 @@ fn innerParse(comptime T: type, arena: *ArenaAllocator, scanner: *Scanner) Parse
                     _ = try scanner.skipValue();
                 }
             }
-
             debug.assert(struct_info.fields.len == field_count);
             return ret;
         },
@@ -233,21 +231,21 @@ fn innerParse(comptime T: type, arena: *ArenaAllocator, scanner: *Scanner) Parse
 //     comment: *Comment,
 // };
 
-fn Listing(comptime T: type) type {
-    return struct {
-        before: ?String,
-        after: ?String,
-        dist: ?Uint,
-        children: []T,
-    };
-}
+const Listing = struct {
+    // before: ?String,
+    // after: ?String,
+    // dist: ?Uint,
+    // modhash: ?String,
+    // geo_filter: String,
+    // children: []Thing,
 
-// const Listing = struct {
-//     before: ?String,
-//     after: ?String,
-//     dist: ?Uint,
-//     children: []Listing,
-// };
+    before: ?String,
+    after: ?String,
+    dist: ?Uint,
+    modhash: ?String,
+    geo_filter: String,
+    children: []Thing,
+};
 
 const More = struct {
     count: Uint,
@@ -296,28 +294,124 @@ const Link = struct {
 const Comment = struct {
     name: String,
     body: ?String,
-    replies: ?*Listing(Comment),
+    replies: ?Thing,
     author: String,
+};
+
+// fn FieldNames(comptime T: type) type {
+//     const fields = @typeInfo(T).Struct.fields;
+//     return [fields.len][]const u8;
+// }
+
+pub fn FilteredComment(comptime T: type, field_names: anytype) type {
+    const StructField = std.builtin.Type.StructField;
+
+    var buf: [1 << 13]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    var field_list: [field_names.len]StructField = undefined;
+    const struct_info = @typeInfo(T).Struct;
+    const fields = struct_info.fields;
+
+    var i: usize = 0;
+    for (fields) |field| {
+        for (field_names) |name| {
+            if (mem.eql(u8, field.name, name)) {
+                const new_field = StructField{
+                    .name = fba.threadSafeAllocator().dupeZ(u8, name) catch unreachable,
+                    .type = field.type,
+                    .default_value = null,
+                    .is_comptime = false,
+                    .alignment = @alignOf(field.type),
+                };
+                field_list[i] = new_field;
+                i += 1;
+            }
+        }
+    }
+
+    return @Type(std.builtin.Type{
+        .Struct = .{
+            .layout = .auto,
+            .backing_integer = null,
+            .fields = &field_list,
+            .decls = &.{},
+            .is_tuple = false,
+        },
+    });
+}
+
+pub fn getThing2(ptr: anytype, kind: []const u8) Thing2 {
+    // const T = @TypeOf(ptr);
+    // const info = @typeInfo(T).Pointer;
+    // debug.assert(info.size == .One);
+    // const Child = info.child;
+    return Thing2{
+        .ctx = @as(*anyopaque, @ptrCast(@alignCast(ptr))),
+        .kind = kind,
+    };
+}
+
+const Thing2 = struct {
+    ctx: *anyopaque,
+    kind: []const u8,
+    fn get(self: *const Thing2) *opaque {} {
+        const T = if (mem.eql(u8, self.kind, "Listing"))
+            Listing
+        else if (mem.eql(u8, self.kind, "more"))
+            More
+        else if (mem.eql(u8, self.kind, "t1"))
+            Comment
+        else if (mem.eql(u8, self.kind, "t3"))
+            Link
+        else
+            unreachable;
+
+        return @as(T, @ptrCast(@alignCast(self.ctx)));
+    }
 };
 
 const print = std.debug.print;
 
+test "fileterd struct" {
+    if (true) return error.SkipZigTest;
+    print("\n", .{});
+
+    const allocator = std.heap.page_allocator;
+
+    const more: *More = try allocator.create(More);
+    const link: *Link = try allocator.create(Link);
+
+    const t1 = getThing2(more, "more");
+    const t2 = getThing2(link, "t3");
+
+    const ts: [2]Thing2 = .{ t1, t2 };
+    _ = ts; // autofix
+
+    const m1 = t1.get();
+    _ = m1; // autofix
+
+    // const T = FilteredComment(More, .{ "count", "id" });
+    // const val = T{
+    //     .count = 4,
+    //     .id = "haha",
+    // };
+
+    // print("{any}\n", .{val});
+}
+
 test "customize json listing new" {
     // if (true) return error.SkipZigTest;
-
     print("\n", .{});
 
     const allocator = std.heap.page_allocator;
     // const allocator = std.testing.allocator;
 
+    // const s = @embedFile("testjson/listing_new.json");
     const s = @embedFile("testjson/listing_new_simple.json");
-    // const s = @embedFile("testjson/comments2.json");
 
-    const Model = Listing(Link);
+    const Model = Thing;
     const parsed = try parse(Model, allocator, s);
     _ = parsed; // autofix
-
-    // parsed.children;
 
     // for (parsed.children) |link| {
     //     _ = link; // autofix
@@ -334,38 +428,34 @@ test "customize json listing comments" {
 
     const s = @embedFile("testjson/comments2.json");
 
-    const Model = struct {
-        listing_link: Listing(Link),
-        listing_comment: Listing(Comment),
-    };
+    const Model = [2]Thing;
     // const Model = []Thing;
     // _ = Model; // autofix
 
     const parsed = try parse(Model, allocator, s);
     defer parsed.deinit();
 
-    // const thing = parsed.value;
+    const thing = parsed.value;
 
-    // {
-    //     const listing = thing[0].listing.children;
-    //     _ = listing; // autofix
-    //     // const link = thing[0].tisting;
+    {
+        const listing = thing[0].listing.children;
+        _ = listing; // autofix
+        // const link = thing[0].tisting;
 
-    //     // for (listing_link) |_link| {
-    //     //     const link = _link.link;
-    //     //     // print("{s}\n", .{link});
+        // for (listing_link) |_link| {
+        //     const link = _link.link;
+        //     // print("{s}\n", .{link});
 
-    //     // }
-    // }
+        // }
+    }
 
-    // {
-    //     const listing = thing[1].listing.children;
-    //     _ = listing; // autofix
+    {
+        // const listing = thing[1].listing.children;
 
-    //     for (thing[1].listing.children) |thing| {
-    //         thing.comment;
-    //     }
-    // }
+        // for (thing[1].listing.children) |thing| {
+        //     thing.comment;
+        // }
+    }
 
     // ====================
 
@@ -547,4 +637,26 @@ test "token stream json" {
     // print("{any}\n", .{try scanner.next()});
 
     // try parse(Model, allocator, s);
+}
+
+test "apoieur" {
+    if (true) return error.SkipZigTest;
+
+    const info = @typeInfo(Thing);
+    const union_info = info.Union;
+
+    print("\n", .{});
+
+    const fields = union_info.fields;
+    inline for (fields) |field| {
+        print("{s}\n", .{field.name});
+        print("{}\n", .{field.type});
+        print("\n", .{});
+    }
+
+    // print("{any}\n", .{union_info.layout});
+    // print("{any}\n", .{union_info.fields});
+    // print("{any}\n", .{dinfo.Union.tag_type});
+    // print("{}\n", .{info});
+    // @compileError(info.Enum.);
 }

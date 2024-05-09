@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const debug = std.debug;
 const mem = std.mem;
 const testing = std.testing;
@@ -7,23 +8,16 @@ const Allocator = std.mem.Allocator;
 const Client = std.http.Client;
 const Headers = std.http.Headers;
 const Parsed = std.json.Parsed;
+// const ResponseStorage = std.http.Client.FetchOptions.ResponseStorage;
 
-const AccessToken = @import("endpoint/access_token.zig").AccessToken;
+const model = @import("model.zig");
+
+// const AccessToken = @import("endpoint/access_token.zig").AccessToken;
 const ApiRequest = @import("ApiRequest.zig");
 const ApiResponse = ApiRequest.ApiResponse;
-const getEndpoint = @import("endpoint.zig").getEndpoint;
-// const api = @import("endpoint.zig");
+const ResponseBuffer = ApiRequest.ResponseBuffer;
 
-pub const Bool = bool;
-pub const Integer = i64;
-pub const Float = f64;
-pub const String = []const u8;
-// pub const
-
-// pub const Config = struct {
-//     thread_safe: bool = !@import("builtin").single_threaded,
-//     MutexType: ?type = null,
-// };
+const api = @import("api.zig");
 
 pub const AuthorizationOptions = struct {
     user_agent: []const u8,
@@ -35,6 +29,7 @@ pub const AuthorizationOptions = struct {
 
 pub const Authorization = struct {
     authorization: []const u8,
+    default_user_agent: []const u8,
 
     pub const Self = @This();
 
@@ -58,11 +53,12 @@ pub const Authorization = struct {
             };
             defer fballoc.free(basic_auth);
 
-            const requ_payload = try fmt.allocPrint(fballoc, "grant_type=password&username={s}&password={s}", .{ options.user_id, options.user_pass });
-            defer fballoc.free(requ_payload);
+            const payload = try fmt.allocPrint(fballoc, "grant_type=password&username={s}&password={s}", .{ options.user_id, options.user_pass });
+            defer fballoc.free(payload);
 
             // const endpoint = try api.Endpoint.parse(fballoc, AccessToken{});
-            const endpoint = try getEndpoint(fballoc, AccessToken{});
+
+            const endpoint = try api.getEndpoint(fballoc, api.AccessToken{});
             defer endpoint.deinit(fballoc);
 
             const request = ApiRequest{
@@ -70,129 +66,248 @@ pub const Authorization = struct {
                 .method = endpoint.method,
                 .user_agent = options.user_agent,
                 .authorization = basic_auth,
-                .payload = requ_payload,
+                .payload = payload,
             };
             // break :blk try request.fetch(&client, .{ .static = &response_buffer });
 
             var response_buffer = std.ArrayList(u8).init(fballoc);
             break :blk try request.fetch(&client, .{ .dynamic = &response_buffer });
         };
-        const parsed = try response.parse(AccessToken.Model, fballoc);
+        const parsed = try model.parse(api.AccessToken.Model, fballoc, response.payload);
         defer parsed.deinit();
         const authorization = try fmt.allocPrint(allocator, "{s} {s}", .{ parsed.value.token_type, parsed.value.access_token });
-        return Self{ .authorization = authorization };
+        return Self{
+            .authorization = authorization,
+            .default_user_agent = options.user_agent,
+        };
     }
 
     pub fn deinit(self: *Self, allocator: Allocator) void {
         allocator.free(self.authorization);
     }
 
-    pub fn agent(self: *const Self, allocator: Allocator, user_agent: []const u8) Agent {
-        const client = Client{ .allocator = allocator };
-        const response_buffer = std.ArrayList(u8).init(allocator);
-        return Agent{
-            .user_agent = user_agent,
-            .authorization = self.authorization,
-            .client = client,
-            .response_buffer = response_buffer,
-        };
+    pub fn agent(self: *const Self, allocator: Allocator, optional_user_agent: ?[]const u8, comptime buffer_type: AgentBufferType) Agent(buffer_type) {
+        const user_agent = optional_user_agent orelse self.default_user_agent;
+        return Agent(buffer_type).init(allocator, user_agent, self.authorization);
+    }
+
+    pub fn agent_unmanaged(self: *const Self, allocator: Allocator, optional_user_agent: ?[]const u8, comptime buffer_type: AgentBufferType) AgentUnmanaged(buffer_type) {
+        const user_agent = optional_user_agent orelse self.default_user_agent;
+        return AgentUnmanaged(buffer_type).init(allocator, user_agent, self.authorization);
     }
 };
 
-pub const Agent = struct {
-    user_agent: []const u8,
-    authorization: []const u8,
-    client: Client,
-    response_buffer: std.ArrayList(u8),
+// pub fn ParsedResult
 
-    const Self = @This();
+// TODO static and dynamic options
 
-    pub fn deinit(self: *Self) void {
-        self.response_buffer.deinit();
-        self.client.deinit();
-    }
-
-    // pub fn fetch(self: *Self, allocator: Allocator, api_context: anytype) !Parsed(@TypeOf(api_context).Model) {
-    //     return self.fetchModelWithContext(@TypeOf(api_context).Model, allocator, api_context);
-    // }
-
-    fn verifyEndpoint(EndpointType: type) bool {
-        const info = @typeInfo(EndpointType);
-        debug.assert(info == .Struct);
-
-        const fields = info.Struct.fields;
-        const field_url = fields[0];
-        _ = field_url; // autofix
-        const field_method = fields[1];
-
-        _ = field_method; // autofix
-        // if (fields[0].  )
-
-        // if (mem.eql(u8, field_url.name, "url") or mem.eql(u8, field_url.type, "method") or field_url.type =) {
-        //     //
-        // }
-
-        // if (field_url or mem.eql(u8, field_url.type, "method")) {
-        //     //
-        // }
-
-    }
-
-    pub fn fetch(self: *Self, allocator: Allocator, endpoint: anytype) !Parsed(@TypeOf(endpoint).Model) {
-        const response = try self.fetchRaw(endpoint);
-        return try json.parseFromSlice(@TypeOf(endpoint).Model, allocator, response.payload, .{
-            .ignore_unknown_fields = true,
-        });
-    }
-
-    pub fn fetchWithContext(self: *Self, allocator: Allocator, context: anytype) !Parsed(@TypeOf(context).Model) {
-        const endpoint = try getEndpoint(@TypeOf(context).Model).parse(allocator, context);
-        defer endpoint.deinit(allocator);
-        return self.fetch(endpoint);
-    }
-
-    pub fn fetchRaw(self: *Self, endpoint: anytype) !ApiResponse {
-        self.response_buffer.clearRetainingCapacity();
-        const request = ApiRequest{
-            .uri = endpoint.url.value,
-            .method = endpoint.method,
-            .user_agent = self.user_agent,
-            .authorization = self.authorization,
-            .payload = null,
-        };
-        return request.fetch(&self.client, .{ .dynamic = &self.response_buffer });
-    }
-
-    pub fn fetchRawWithContext(self: *Self, allocator: Allocator, context: anytype) !ApiResponse {
-        const endpoint = try getEndpoint(@TypeOf(context).Model).parse(allocator, context);
-        defer endpoint.deinit(allocator);
-        return self.fetchRaw(endpoint);
-    }
-
-    // pub fn fetchModelWithContext(self: *Self, comptime Model: type, allocator: Allocator, api_context: anytype) !Parsed(Model) {
-    //     const endpoint = try api.Endpoint.parse(allocator, api_context);
-    //     defer endpoint.deinit(allocator);
-    //     return self.fetchModel(Model, allocator, endpoint);
-    // }
+pub const AgentBufferType = union(enum) {
+    dynamic,
+    static: usize,
 };
+
+pub fn Agent(comptime buffer_type: AgentBufferType) type {
+    return struct {
+        unmanaged: Unmanaged,
+        allocator: Allocator,
+
+        const Self = @This();
+        const Unmanaged = AgentUnmanaged(buffer_type);
+
+        pub fn init(allocator: Allocator, user_agent: []const u8, authorization: []const u8) Self {
+            return Self{
+                .unmanaged = Unmanaged.init(allocator, user_agent, authorization),
+                .allocator = allocator,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.unmanaged.deinit();
+        }
+
+        pub fn fetch(self: *Self, endpoint_or_context: anytype) !Parsed(@TypeOf(endpoint_or_context).Model) {
+            return self.unmanaged.fetch(self.allocator, endpoint_or_context);
+        }
+
+        pub fn fetchBytes(self: *Self, endpoint_or_context: anytype) !ApiResponse {
+            return self.unmanaged.fetchBytes(self.allocator, endpoint_or_context);
+        }
+    };
+}
+
+pub fn AgentUnmanaged(comptime buffer_type: AgentBufferType) type {
+    return struct {
+        user_agent: []const u8,
+        authorization: []const u8,
+        client: Client,
+        buffer: Buffer,
+
+        const Self = @This();
+
+        const Buffer = switch (buffer_type) {
+            .dynamic => struct {
+                inner_buf: std.ArrayList(u8),
+                fn init(allocator: Allocator) @This() {
+                    return @This(){ .inner_buf = std.ArrayList(u8).init(allocator) };
+                }
+                fn deinit(self: @This()) void {
+                    self.inner_buf.deinit();
+                }
+                fn responseBuffer(self: *@This()) ResponseBuffer {
+                    self.inner_buf.clearRetainingCapacity();
+                    return .{ .dynamic = &self.inner_buf };
+                }
+            },
+            .static => |len| struct {
+                inner_buf: [len]u8 = undefined,
+                fn init(_: Allocator) @This() {
+                    return @This(){};
+                }
+                fn deinit(_: @This()) void {}
+                fn responseBuffer(self: *@This()) ResponseBuffer {
+                    return .{ .static = &self.inner_buf };
+                }
+            },
+        };
+
+        pub fn init(allocator: Allocator, user_agent: []const u8, authorization: []const u8) Self {
+            const client = Client{ .allocator = allocator };
+            const buffer = Buffer.init(allocator);
+            return Self{
+                .user_agent = user_agent,
+                .authorization = authorization,
+                .client = client,
+                .buffer = buffer,
+            };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.buffer.deinit();
+            self.client.deinit();
+        }
+
+        pub fn fetch(self: *Self, allocator: Allocator, endpoint_or_context: anytype) !Parsed(@TypeOf(endpoint_or_context).Model) {
+            const T = @TypeOf(endpoint_or_context);
+            api.verifyEndpointOrContext(T);
+            if (api.isEndpoint(T)) {
+                return self.fetchWithEndpoint(allocator, endpoint_or_context);
+            } else if (api.isContext(T)) {
+                return self.fetchWithContext(allocator, endpoint_or_context);
+            } else {}
+            unreachable;
+            // @panic("Invalid endpoint type or endpoint context type");
+        }
+
+        pub fn fetchBytes(self: *Self, allocator: Allocator, endpoint_or_context: anytype) !ApiResponse {
+            const T = @TypeOf(endpoint_or_context);
+            api.verifyEndpointOrContext(T);
+            if (api.isEndpoint(T)) {
+                return self.fetchBytesWithEndpoint(endpoint_or_context);
+            } else if (api.isContext(T)) {
+                return self.fetchBytesWithContext(allocator, endpoint_or_context);
+            } else {}
+            unreachable;
+            // @panic("Invalid endpoint type or endpoint context type");
+        }
+
+        pub fn fetchWithEndpoint(self: *Self, allocator: Allocator, endpoint: anytype) !Parsed(@TypeOf(endpoint).Model) {
+            api.verifyEndpoint(@TypeOf(endpoint));
+            const response = try self.fetchBytesWithEndpoint(endpoint);
+            defer response.deinit();
+            return model.parse(@TypeOf(endpoint).Model, allocator, response.payload);
+        }
+
+        pub fn fetchBytesWithEndpoint(self: *Self, endpoint: anytype) !ApiResponse {
+            api.verifyEndpoint(@TypeOf(endpoint));
+            const options = api.FetchOptions{
+                .client = &self.client,
+                .response_buffer = self.buffer.responseBuffer(),
+                // .response_buffer = self.inner_buffer.responseStorage(),
+                // .response_storage = self.buffer.responseBuffer(),
+                .user_agent = self.user_agent,
+                .authorization = self.authorization,
+                .payload = null,
+            };
+            return endpoint.fetchAdaptor(undefined, options);
+        }
+
+        pub fn fetchWithContext(self: *Self, allocator: Allocator, context: anytype) !Parsed(@TypeOf(context).Model) {
+            api.verifyContext(@TypeOf(context));
+            const response = try self.fetchBytesWithContext(allocator, context);
+            defer response.deinit();
+            return model.parse(@TypeOf(context).Model, allocator, response.payload);
+        }
+
+        pub fn fetchBytesWithContext(self: *Self, allocator: Allocator, context: anytype) !ApiResponse {
+            api.verifyContext(@TypeOf(context));
+            const options = api.FetchOptions{
+                .client = &self.client,
+                .response_buffer = self.buffer.responseBuffer(),
+                // .response_storage = self.buffer.responseBuffer(),
+                .user_agent = self.user_agent,
+                .authorization = self.authorization,
+                .payload = null,
+            };
+            return context.fetchAdaptor(allocator, options);
+        }
+    };
+}
 
 const print = std.debug.print;
 
 const testOptions = @import("util.zig").testOptions;
 const TestOptions = @import("util.zig").TestOptions;
+// const parser = @import("parser.zig");
+
+test "xoiuer" {
+    if (true) return error.SkipZigTest;
+    const allocator = std.heap.page_allocator;
+
+    // verifyEndpoint();
+    const Context = api.ListingNew("zig");
+
+    // const parsed = try agent.fetchModelWithContext(Context, allocator, Context{
+    //     .count = 3,
+    // });
+    // defer parsed.deinit();
+
+    // const endpoint = api.Endpoint.parsed(Context{
+    //     .count = 3,
+    // });
+
+    const endpoint = try api.getEndpoint(allocator, Context{
+        .count = 3,
+    });
+    defer endpoint.deinit(allocator);
+
+    const T = @TypeOf(endpoint);
+
+    print("{any}\n", .{api.isEndpoint(T)});
+
+    const Model = T.Model;
+
+    const info = @typeInfo(Model);
+    _ = info; // autofix
+
+    // @compileLog(info);
+
+    // debug.assert(info == .Struct);
+
+    // print("{any}\n", .{info == .Struct});
+}
 
 test "auth" {
-    if (true) return error.SkipZigTest;
+    // if (true) return error.SkipZigTest;
 
     const testopts: TestOptions = testOptions() orelse return error.SkipZigTest;
 
-    const allocator = std.testing.allocator;
-    // const allocator = std.heap.page_allocator;
+    // const allocator = std.testing.allocator;
+    const allocator = std.heap.page_allocator;
 
     const user_agent = testopts.user_agent;
 
-    var client = Client{ .allocator = allocator };
-    defer client.deinit();
+    // var client = Client{ .allocator = allocator };
+    // defer client.deinit();
 
     var auth = try Authorization.fetch(allocator, .{
         .user_agent = user_agent,
@@ -203,103 +318,78 @@ test "auth" {
     });
     defer auth.deinit(allocator);
 
-    var agent = auth.agent(allocator, user_agent);
+    // const config = AgentBufferType{
+    //     .buffer_type = .dynamic,
+    //     // .buffer_type = .{ .static = 1024 * 1024 * 4 },
+    // };
+
+    // var agent = auth.agent(allocator, null, .dynamic);
+    // const buffer_type: AgentBufferType ;
+    // var agent = auth.agent_unmanaged(allocator, null, .{ .static = 1024 * 1024 });
+    var agent = auth.agent(allocator, null, .{ .static = 1024 * 1024 });
+    // var agent = auth.agent(allocator, null, .dynamic);
     defer agent.deinit();
 
     {
-        const New = @import("endpoint/listing.zig").New;
-        // const res = try agent.fetchRawWithContext(allocator, New("zig"){
-        //     .count = 2,
-        // });
-        // defer res.deinit(allocator);
+        {
+            // const Context = api.ListingNew("zig");
+            // const endpoint = try api.getEndpoint(allocator, Context{
+            //     .count = 3,
+            // });
+            // defer endpoint.deinit(allocator);
 
-        // print("{s}\n", .{res.payload});
+            // const response = try agent.fetchBytes(allocator, endpoint);
+            // defer response.deinit();
+            // // print("{s}\n", .{response.payload});
+        }
 
-        // const model = try agent.fetch(allocator, New("zig"){
-        //     .count = 2,
-        // });
+        {
+            // const Context = api.ListingNew("zig");
+            // const response = try agent.fetchBytes(allocator, Context{
+            //     .count = 3,
+            // });
+            // defer response.deinit();
+            // const parsed = try model.parse(Thing, allocator, response.payload);
+            // defer parsed.deinit();
+        }
 
-        // const children = model.data.children;
-        // const x = children[0].data;
+        {
+            // const Context = api.ListingNew("zig");
+            // const parsed = try agent.fetchWithContext(allocator, Context{
+            //     .count = 3,
+            // });
+            // defer parsed.deinit();
+            // print("{any}\n", .{parsed.value});
+        }
 
-        // const model = try agent.fetchModelWithContext(New("zig").Model, allocator, New("zig"){
-        //     .count = 3,
-        // });
+        {
+            // const Context = api.ListingNew("zig");
+            // const endpoint = try api.getEndpoint(allocator, Context{
+            //     .count = 3,
+            // });
+            // const parsed = try agent.fetchWithEndpoint(allocator, endpoint);
+            // defer parsed.deinit();
 
-        const Context = New("zig");
+            // print("{any}\n", .{parsed.value});
+        }
 
-        // const parsed = try agent.fetchModelWithContext(Context, allocator, Context{
-        //     .count = 3,
-        // });
-        // defer parsed.deinit();
+        {
+            const Context = api.ListingNew("zig");
+            const parsed = try agent.fetch(Context{
+                .count = 3,
+            });
+            defer parsed.deinit();
 
-        // const endpoint = api.Endpoint.parsed(Context{
-        //     .count = 3,
-        // });
-
-        const endpoint = try getEndpoint(allocator, Context{
-            .limit = 1,
-            // .sr_detail = true,
-        });
-        defer endpoint.deinit(allocator);
-
-        print("{s}\n", .{endpoint.url.value});
-
-        // const context = Context{ .count = 3 }.toEndpoint();
-
-        const parsed = try agent.fetch(allocator, endpoint);
-        defer parsed.deinit();
-
-        // print("{any}\n", .{x.id});
-
-        // ================
-
-        // const parsed = try json.parseFromSlice(GenericPayload(ListingPayload), allocator, res.payload, .{
-        //     .ignore_unknown_fields = true,
-        // });
-        // print("{any}\n", .{parsed.value});
-
-        // ================
-
-        // const Value = std.json.Value;
-        // const parsed = try json.parseFromSlice(Value, allocator, res.payload, .{
-        //     .ignore_unknown_fields = true,
-        // });
-
-        // const root = parsed.value;
-
-        // const kind = root.object.get("kind").?.string;
-        // print("kind: {s}\n", .{kind});
-
-        // const data = root.object.get("data").?.object;
-        // print("data: {any}\n", .{data});
-
-        // const selftext = root.object.get("selftext").?;
-
-        // print("{any}\n", .{root.object});
-        // print("{any}\n", .{@TypeOf(root.o)});
+            print("{any}\n", .{parsed.value});
+        }
     }
-
-    {
-        // const Me = @import("api/account.zig").Me;
-        // const res = try agent.fetchRawWithContext(allocator, Me{});
-        // defer res.deinit(allocator);
-
-        // print("{s}\n", .{res.payload});
-    }
-
-    // print("connection_pool used len: {}\n", .{agent.client.connection_pool.used.len});
-    // print("connection_pool free len: {}\n", .{agent.client.connection_pool.free_len});
-
-    // const res = try agent.fetch(allocator, );
 }
 
 const json = std.json;
 
-const model = @import("model.zig");
-
 const Thing = model.Thing;
 const Listing = model.Listing;
+const Link = model.Link;
 const Comment = model.Comment;
 
 test "test json" {
@@ -363,17 +453,19 @@ test "test json static" {
 }
 
 test "test json static comment" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     print("\n", .{});
     const allocator = std.heap.page_allocator;
 
     const s = @embedFile("testjson/comments2.json");
 
-    const Model = struct {
-        Thing(Listing),
-        Thing(Comment),
-    };
+    // const Model = struct {
+    //     Thing(Listing),
+    //     Thing(Comment),
+    // };
+
+    const Model = [2]Thing;
 
     const parsed = try json.parseFromSlice(Model, allocator, s, .{
         .ignore_unknown_fields = true,
