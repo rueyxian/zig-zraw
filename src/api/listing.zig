@@ -21,34 +21,22 @@ pub fn ListingNew(comptime subreddit: []const u8) type {
         pub const url = domain_oauth ++ "r/" ++ subreddit ++ "/new";
         pub const method = Method.GET;
         pub const Model = Thing;
-        // pub const fetchAdaptor = api.contextFetchAdaptor;
         pub const fetchAdaptor = api.getContextFetchAdaptorFn(@This());
-
-        // pub fn fetchAdaptor(self: *const @This(), allocator: std.mem.Allocator, options: api.FetchOptions) !ApiResponse {
-        //     // return api.getContextFetchFn(@This())(self, allocator, options);
-        //     // std.debug.print("DEBUG MODEL: {}\n", .{@This().Model});
-
-        //     return api.ImplFetchAdaptorFn(@This()).fetchAdaptor(self, allocator, options);
-        // }
     };
 }
 
 // https://www.reddit.com/dev/api/#GET_comments_{article}
 pub fn ListingComments(comptime subreddit: []const u8, comptime article: []const u8) type {
     return struct {
+        comment: ?[]const u8 = null,
+        context: ?std.math.IntFittingRange(0, 8) = null,
+        depth: ?u64 = null,
+        limit: ?u64 = null,
+        showedits: bool,
+
         pub const url = domain_oauth ++ "r/" ++ subreddit ++ "/comments/" ++ article;
         pub const method = Method.GET;
         pub const Model = [2]Thing;
+        pub const fetchAdaptor = api.getContextFetchAdaptorFn(@This());
     };
 }
-
-// pub fn ListingData(comptime T: type) type {
-//     return struct {
-//         after: ?[]const u8,
-//         dist: ?Number,
-//         modhash: ?[]const u8,
-//         children: []const GenericPayload(T),
-//     };
-// }
-
-// pub fn
