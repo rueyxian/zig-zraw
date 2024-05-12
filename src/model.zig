@@ -541,7 +541,7 @@ pub const Link = struct {
     hidden: bool,
     // pwls: Uint,  // NOTE: unimplemented
     link_flair_css_class: ?String,
-    downs: Uint,
+    downs: Int,
     // // top_awarded_type: null,  // NOTE: unimplemented
     hide_score: bool,
     media_metadata: ?[]MediaMetadata = null,
@@ -551,7 +551,7 @@ pub const Link = struct {
     upvote_ratio: Float,
     author_flair_background_color: ?String,
     subreddit_type: SubredditType,
-    ups: Uint,
+    ups: Int,
     total_awards_received: Uint,
     media_embed: ?MediaEmbeded,
     author_flair_template_id: ?String,
@@ -728,7 +728,7 @@ pub const Comment = struct {
     // author_flair_css_class: null,  // NOTE: unimplemented
     name: String,
     is_submitter: bool,
-    downs: Uint,
+    downs: Int,
     author_flair_richtext: ?[]FlairRichtext = null,
     // author_patreon_flair: false, // NOTE: unimplemented
     body_html: String,
@@ -754,12 +754,12 @@ pub const Comment = struct {
     link_id: String,
     subreddit_name_prefixed: String,
     // controversiality: 0, // NOTE unimplemented
-    depth: Uint,
+    depth: ?Uint = null,
     author_flair_background_color: ?String,
     // collapsed_because_crowd_control: null, // NOTE unimplemented
     // mod_reports: [],  // NOTE unimplemented
     // num_reports: null,  // NOTE unimplemented
-    ups: Uint,
+    ups: Int,
 
     pub fn jsonParse(allocator: Allocator, source: anytype, options: ParseOptions) !@This() {
         const Error = ParseError(@TypeOf(source.*));
@@ -785,9 +785,7 @@ pub const Comment = struct {
                         };
                         const T = optional_info.child;
                         debug.assert(T == Thing);
-
-                        const val = try ImplJsonParseEmptyStringAsNullFn(T).jsonParse(allocator, source, options);
-                        @field(ret, field.name) = val;
+                        @field(ret, field.name) = try ImplJsonParseEmptyStringAsNullFn(T).jsonParse(allocator, source, options);
                     } else if (mem.eql(u8, field.name, "edited")) {
                         const optional_info = switch (@typeInfo(field.type)) {
                             .Optional => |optional_info| optional_info,
@@ -795,7 +793,19 @@ pub const Comment = struct {
                         };
                         const T = optional_info.child;
                         @field(ret, field.name) = try ImplJsonParseTokenTypeAsNullFn(.false, T).jsonParse(allocator, source, options);
-                    } else if (field.type == ?[]MediaMetadata and mem.eql(u8, field.name, "media_metadata")) {
+                    }
+
+                    // else if (mem.eql(u8, field.name, "author_flair_background_color")) {
+                    //     const optional_info = switch (@typeInfo(field.type)) {
+                    //         .Optional => |optional_info| optional_info,
+                    //         else => unreachable,
+                    //     };
+                    //     const T = optional_info.child;
+                    //     debug.assert(T == Thing);
+                    //     @field(ret, field.name) = try ImplJsonParseEmptyStringAsNullFn(T).jsonParse(allocator, source, options);
+                    // }
+
+                    else if (field.type == ?[]MediaMetadata and mem.eql(u8, field.name, "media_metadata")) {
                         @field(ret, field.name) = try jsonParseMediaMetadataSlice(allocator, source, options);
                     } else {
                         @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
@@ -814,6 +824,10 @@ pub const Comment = struct {
         try fillDefaultStructValues(@This(), &ret, &fields_seen);
         return ret;
     }
+};
+
+const UserComment = struct {
+    //
 };
 
 const print = std.debug.print;
@@ -919,6 +933,59 @@ test "customize json listing new" {
     }
 }
 
+test " json user comments" {
+    // if (true) return error.SkipZigTest;
+
+    print("\n", .{});
+
+    const allocator = std.heap.page_allocator;
+    // const allocator = std.testing.allocator;
+
+    // const s = @embedFile("testjson/comments.json");
+    const s = @embedFile("testjson/user_comment.json");
+    // const s = @embedFile("testjson/listing_comment_author_deleted.json");
+
+    const Model = Thing;
+    // _ = Model; // autofix
+
+    // const parsed = try json.parseFromSlice(JsonValue, allocator, s, .{
+    const parsed = try json.parseFromSlice(Model, allocator, s, .{
+        .ignore_unknown_fields = true,
+    });
+    // const root = parsed.value;
+
+    const root = parsed.value;
+
+    print("#######################\n", .{});
+
+    // print("{any}\n", .{root[0]});
+    // print("{any}\n", .{root[1]});
+
+    {
+        const comment_children = root.listing.children;
+
+        for (comment_children) |child| {
+            const comment = child.comment;
+            // print("{s}\n", .{comment.body});
+            print("{s}\n", .{comment.author});
+
+            // for (comment.replies)
+            if (comment.replies) |replies_thing| {
+                const reply_children = replies_thing.listing.children;
+                // print("   {any}\n", .{replies_thing});
+
+                for (reply_children) |reply| {
+                    const comment2 = reply.comment;
+
+                    print("      {s}\n", .{comment2.author});
+                }
+            }
+        }
+    }
+
+    // recurPrintComments(root[1], 0);
+}
+
 test " json listing comments" {
     if (true) return error.SkipZigTest;
 
@@ -953,64 +1020,7 @@ test " json listing comments" {
         _ = link_children; // autofix
     }
 
-    // {
-    //     const comment_children = root[1].listing.children;
-
-    //     for (comment_children) |child| {
-    //         const comment = child.comment;
-    //         // print("{s}\n", .{comment.body});
-    //         print("{s}\n", .{comment.author});
-
-    //         // for (comment.replies)
-    //         if (comment.replies) |replies_thing| {
-    //             const reply_children = replies_thing.listing.children;
-    //             // print("   {any}\n", .{replies_thing});
-
-    //             for (reply_children) |reply| {
-    //                 const comment2 = reply.comment;
-
-    //                 print("      {s}\n", .{comment2.author});
-    //             }
-    //         }
-    //     }
-    // }
-
     recurPrintComments(root[1], 0);
-
-    {
-        // const c1 = root[0].listing.children[0].comment;
-
-        // // print("\n")
-        // if (c1.replies) |_thing| {
-        //     // for (replies) |reply| {
-        //     //     print("{}\n", .{reply});
-        //     // }
-
-        //     // print("{any}\n", .{_thing});
-
-        //     switch (_thing) {
-        //         .listing => |listing| {
-        //             const children = listing.children;
-
-        //             for (children) |child_thing| {
-        //                 print("{any}\n", .{child_thing.comment});
-        //             }
-        //         },
-        //         .link => |link| {
-        //             print("{any}\n", .{link});
-        //         },
-
-        //         .comment => |comment| {
-        //             print("{any}\n", .{comment});
-        //         },
-        //         else => {
-        //             // unreachable;
-        //         },
-        //     }
-        // } else {
-        //     print("replies: null\n", .{});
-        // }
-    }
 }
 
 fn recurPrintComments(thing: Thing, level: usize) void {

@@ -7,6 +7,24 @@ const mem = std.mem;
 const Allocator = std.mem.Allocator;
 const Thread = std.Thread;
 
+pub const BytesIterator = struct {
+    bytes: []const u8,
+    pos: usize = 0,
+
+    pub fn next(self: *@This()) ?u8 {
+        debug.assert(self.pos <= self.bytes.len);
+        if (self.pos == self.bytes.len) return null;
+        defer self.pos += 1;
+        return self.bytes[self.pos];
+    }
+
+    pub fn peek(self: *const @This()) ?u8 {
+        debug.assert(self.pos <= self.bytes.len);
+        if (self.pos + 1 == self.bytes.len) return null;
+        return self.bytes[self.pos + 1];
+    }
+};
+
 pub const TestOptions = struct {
     app_id: []const u8,
     app_pass: []const u8,
