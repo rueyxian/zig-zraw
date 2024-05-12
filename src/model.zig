@@ -90,6 +90,20 @@ fn ImplJsonParseEmptyStringAsNullFn(comptime T: type) type {
     };
 }
 
+// NOTE stold from std/json/static.zig
+fn fillDefaultStructValues(comptime T: type, r: *T, fields_seen: *[@typeInfo(T).Struct.fields.len]bool) !void {
+    inline for (@typeInfo(T).Struct.fields, 0..) |field, i| {
+        if (!fields_seen[i]) {
+            if (field.default_value) |default_ptr| {
+                const default = @as(*align(1) const field.type, @ptrCast(default_ptr)).*;
+                @field(r, field.name) = default;
+            } else {
+                return error.MissingField;
+            }
+        }
+    }
+}
+
 pub const SubredditType = enum {
     public,
     private,
@@ -201,8 +215,12 @@ fn jsonParseOptionalMediaEmbeded(allocator: Allocator, source: anytype, options:
     return ret;
 }
 
-pub const Media = union(enum) {
-    reddit_video: struct {
+pub const Media = struct {
+    reddit_video: ?RedditVideo = null,
+    oembed: ?Oembed = null,
+    type: ?String = null,
+
+    pub const RedditVideo = struct {
         bitrate_kbps: Uint,
         fallback_url: String,
         has_audio: bool,
@@ -214,8 +232,9 @@ pub const Media = union(enum) {
         hls_url: String,
         is_gif: bool,
         transcoding_status: String,
-    },
-    oembed: struct {
+    };
+
+    pub const Oembed = struct {
         provider_url: String,
         version: String,
         title: ?String = null,
@@ -230,45 +249,93 @@ pub const Media = union(enum) {
         thumbnail_height: ?Uint = null,
         author_url: ?String = null,
         cache_age: ?Uint = null,
-    },
-
-    pub fn jsonParse(allocator: Allocator, source: anytype, options: ParseOptions) !@This() {
-        const Error = ParseError(@TypeOf(source.*));
-
-        if (try source.next() != .object_begin) {
-            return Error.UnexpectedToken;
-        }
-
-        const media_tag_name = switch (try source.next()) {
-            .string => |s| s,
-            else => return Error.UnexpectedToken,
-        };
-
-        const info = @typeInfo(Media).Union;
-
-        inline for (info.fields) |field| {
-            if (mem.eql(u8, field.name, media_tag_name)) {
-                const val = try json.innerParse(field.type, allocator, source, options);
-                if (mem.eql(u8, field.name, "reddit_video") == false) {
-                    // NOTE: to skip field "type" and its value
-                    try source.skipValue();
-                    try source.skipValue();
-                }
-                if (try source.next() != .object_end) {
-                    return Error.UnexpectedToken;
-                }
-
-                return @unionInit(@This(), field.name, val);
-            }
-        } else return Error.UnexpectedToken;
-
-        unreachable;
-    }
+    };
 };
 
 pub const MediaMetadata = struct {
-    // TODO
+    id: String,
+    status: String,
+    e: String,
+    m: String,
+    ext: ?String = null,
+    t: ?String = null,
+    o: ?[]O = null,
+    p: []P,
+    s: ?S = null,
+    pub const O = struct {
+        x: Uint,
+        y: Uint,
+        u: String,
+    };
+    pub const P = struct {
+        x: Uint,
+        y: Uint,
+        u: String,
+    };
+    pub const S = struct {
+        x: Uint,
+        y: Uint,
+        u: ?String = null,
+        gif: ?String = null,
+        mp4: ?String = null,
+    };
 };
+
+pub fn jsonParseMediaMetadataSlice(allocator: Allocator, source: anytype, options: ParseOptions) ![]MediaMetadata {
+    const Error = ParseError(@TypeOf(source.*));
+
+    // const value: Value = try json.innerParse(Value, allocator, source, options);
+    // // _ = value; // autofix
+    // // print("{any}\n", .{value});
+
+    // const obj_map: json.ObjectMap = switch (value) {
+    //     .object => |obj| obj,
+    //     else => Error.UnexpectedToken,
+    // };
+    // debug.assert(obj_map.count != 0);
+
+    // const ret = try std.ArrayList(MediaMetadata).initCapacity(allocator, obj_map.count);
+
+    // // const ret: *MediaMetadata = try allocator.alloc(MediaMetadata);
+    // // ret.ensureTotalCapacity(obj_map.count);
+    // var it_obj = obj_map.iterator();
+    // while (it_obj.next()) |e| {
+    //     const val = try json.innerParseFromValue(MediaMetadata, allocator, e.value_ptr.*, options);
+    //     // ret.putAssumeCapacityNoClobber(e.key_ptr.*, val);
+    //     ret.appendAssumeCapacity(val);
+    // }
+    // // return ret;
+    // return try ret.toOwnedSlice();
+
+    // ==========================
+
+    // const value: Value = try json.innerParse(Value, allocator, source, options);
+
+    // const obj_map: json.ObjectMap = switch (value) {
+    //     .object => |obj| obj,
+    //     else => Error.UnexpectedToken,
+    // };
+    // debug.assert(obj_map.count != 0);
+
+    // ==============================
+
+    if (try source.next() != .object_begin) {
+        return Error.UnexpectedToken;
+    }
+    var ret = std.ArrayList(MediaMetadata).init(allocator);
+    while (true) {
+        const field_name = switch (try source.next()) {
+            .object_end => break,
+            .string => |s| s,
+            else => return Error.UnexpectedToken,
+        };
+        const val = try json.innerParse(MediaMetadata, allocator, source, options);
+        // print("metadata id: {s}\n", .{field_name});
+        debug.assert(mem.eql(u8, field_name, val.id));
+        try ret.append(val);
+    }
+    return try ret.toOwnedSlice();
+}
 
 pub const TextColor = enum {
     dark,
@@ -411,7 +478,7 @@ pub const Thing = union(enum) {
             else => return Error.UnexpectedToken,
         }
 
-        print("kind_val: {s}\n", .{kind_val});
+        // print("kind_val: {s}\n", .{kind_val});
 
         const thing: Thing = blk: {
             if (mem.eql(u8, kind_val, "Listing")) {
@@ -419,7 +486,6 @@ pub const Thing = union(enum) {
             } else if (mem.eql(u8, kind_val, "more")) {
                 break :blk .{ .more = try json.innerParse(More, allocator, source, options) };
             } else if (mem.eql(u8, kind_val, "t1")) {
-                // print("HAAAAAAAAAA\n", .{});
                 break :blk .{ .comment = try json.innerParse(*Comment, allocator, source, options) };
             } else if (mem.eql(u8, kind_val, "t2")) {
                 @panic("TODO");
@@ -432,27 +498,8 @@ pub const Thing = union(enum) {
             } else if (mem.eql(u8, kind_val, "t6")) {
                 @panic("TODO");
             } else {}
-
             return Error.UnexpectedToken;
         };
-
-        // const thing: Thing = if (mem.eql(u8, kind_val, "Listing"))
-        //     .{ .listing = try json.innerParse(Listing, allocator, source, options) }
-        // else if (mem.eql(u8, kind_val, "more"))
-        //     .{ .more = try json.innerParse(More, allocator, source, options) }
-        // else if (mem.eql(u8, kind_val, "t1"))
-        //     .{ .comment = try json.innerParse(*Comment, allocator, source, options) }
-        // else if (mem.eql(u8, kind_val, "t2")) {
-        //     @panic("TODO");
-        // } else if (mem.eql(u8, kind_val, "t3"))
-        //     .{ .link = try json.innerParse(Link, allocator, source, options) }
-        // else if (mem.eql(u8, kind_val, "t4")) {
-        //     @panic("TODO");
-        // } else if (mem.eql(u8, kind_val, "t5")) {
-        //     @panic("TODO");
-        // } else if (mem.eql(u8, kind_val, "t6")) {
-        //     @panic("TODO");
-        // } else return Error.UnexpectedToken;
 
         if (try source.next() != .object_end) {
             return Error.UnexpectedToken;
@@ -483,20 +530,21 @@ pub const Link = struct {
     approved_at_utc: ?Uint,
     subreddit: String,
     selftext: String,
-    author_fullname: String,
+    author_fullname: ?String = null,
     saved: bool,
     mod_reason_title: ?String,
-    // // gilded: Uint, // NOTE: unimplemented
+    // gilded: Uint, // NOTE: unimplemented
     clicked: bool,
     title: String,
     link_flair_richtext: []FlairRichtext,
     subreddit_name_prefixed: String,
     hidden: bool,
-    // // pwls: Uint,  // NOTE: unimplemented
+    // pwls: Uint,  // NOTE: unimplemented
     link_flair_css_class: ?String,
     downs: Uint,
-    // // // top_awarded_type: null,  // NOTE: unimplemented
-    // hide_score: bool,
+    // // top_awarded_type: null,  // NOTE: unimplemented
+    hide_score: bool,
+    media_metadata: ?[]MediaMetadata = null,
     name: String,
     quarantine: bool,
     link_flair_text_color: TextColor,
@@ -508,76 +556,76 @@ pub const Link = struct {
     media_embed: ?MediaEmbeded,
     author_flair_template_id: ?String,
     is_original_content: bool,
-    // // // user_reports: [],  // NOTE: unimplemented
-    // // // secure_media: null,  // NOTE: unimplemented
+    // // user_reports: [],  // NOTE: unimplemented
+    // // secure_media: null,  // NOTE: unimplemented
     is_reddit_media_domain: bool,
-    // // // is_meta: bool,  // NOTE: unimplemented
-    // // // category: null,  // NOTE: unimplemented
+    // // is_meta: bool,  // NOTE: unimplemented
+    // // category: null,  // NOTE: unimplemented
     secure_media_embed: ?MediaEmbeded,
     link_flair_text: ?String,
-    can_mod_post: bool,
+    // // can_mod_post: bool, // NOTE: unimplemented
     score: Int,
     approved_by: ?String,
     is_created_from_ads_ui: bool,
     author_premium: bool,
     thumbnail: String,
     edited: ?Uint,
-    // // // author_flair_css_class: null,  // NOTE: unimplemented
+    // // author_flair_css_class: null,  // NOTE: unimplemented
     author_flair_richtext: []FlairRichtext,
-    // // // gildings: {},  // NOTE: unimplemented
-    // // // content_categories: null,  // NOTE: unimplemented
+    // // gildings: {},  // NOTE: unimplemented
+    // // content_categories: null,  // NOTE: unimplemented
     is_self: bool,
-    // // // mod_note: null, // NOTE: unimplemented
+    // // mod_note: null, // NOTE: unimplemented
     created: Uint,
     link_flair_type: TextType,
-    // // // wls: 6,  // NOTE: unimplemented
-    // // // removed_by_category: null,  // NOTE: unimplemented
+    // // wls: 6,  // NOTE: unimplemented
+    // // removed_by_category: null,  // NOTE: unimplemented
     // // banned_by: ?String, // NOTE: unimplemented
     author_flair_type: TextType,
     domain: String,
-    // allow_live_comments: bool, // NOTE: unimplemented
+    // // // allow_live_comments: bool, // NOTE: unimplemented
     selftext_html: ?String,
     likes: ?bool,
-    // // // suggested_sort: null,  // NOTE: unimplemented
-    // banned_at_utc: ?Uint, // NOTE: unimplemented
+    // // suggested_sort: null,  // NOTE: unimplemented
+    // // banned_at_utc: ?Uint, // NOTE: unimplemented
     // // view_count: Uint, // NOTE: unimplemented
     archived: bool,
     no_follow: bool,
     is_crosspostable: bool,
     pinned: bool,
     over_18: bool,
-    // // // all_awardings: [],  // NOTE: unimplemented
-    // // // awarders: [],  // NOTE: unimplemented
+    // // all_awardings: [],  // NOTE: unimplemented
+    // // awarders: [],  // NOTE: unimplemented
     media_only: bool,
     sr_detail: ?SrDetail = null,
     // // can_gild: bool, // NOTE: unimplemented
     spoiler: bool,
     locked: bool,
     author_flair_text: ?String,
-    // // // treatment_tags: [],  // NOTE: unimplemented
+    // // treatment_tags: [],  // NOTE: unimplemented
     visited: bool,
     // // removed_by: ?String, // NOTE: unimplemented
     // // num_reports: Uint, // NOTE: unimplemented
     distinguished: ?Distinguished,
     subreddit_id: String,
     author_is_blocked: bool,
-    // // // mod_reason_by: null,   // NOTE: unimplemented
-    // // // removal_reason: null, // NOTE: unimplemented
-    // // // link_flair_background_color: "", // NOTE: unimplemented
+    // // mod_reason_by: null,   // NOTE: unimplemented
+    // // removal_reason: null, // NOTE: unimplemented
+    // // link_flair_background_color: "", // NOTE: unimplemented
     id: String,
     is_robot_indexable: bool,
-    // // // report_reasons: null,  // NOTE: unimplemented
+    // // report_reasons: null,  // NOTE: unimplemented
     author: String,
-    // // // discussion_type: null,  // NOTE: unimplemented
+    // // discussion_type: null,  // NOTE: unimplemented
     num_comments: Uint,
     send_replies: bool,
-    // // // whitelist_status: "all_ads",// NOTE: unimplemented
-    // // // contest_mode: false,  // NOTE: unimplemented
-    // // // mod_reports: [],  // NOTE: unimplemented
-    // // // author_patreon_flair: false, // NOTE: unimplemented
-    // // // author_flair_text_color: null,  // NOTE: unimplemented
+    // // whitelist_status: "all_ads",// NOTE: unimplemented
+    // // contest_mode: false,  // NOTE: unimplemented
+    // // mod_reports: [],  // NOTE: unimplemented
+    // // author_patreon_flair: false, // NOTE: unimplemented
+    // // author_flair_text_color: null,  // NOTE: unimplemented
     permalink: String,
-    // // // parent_whitelist_status: "all_ads" // NOTE: unimplemented,
+    // // parent_whitelist_status: "all_ads" // NOTE: unimplemented,
     stickied: bool,
     url: String,
     subreddit_subscribers: Uint,
@@ -586,8 +634,6 @@ pub const Link = struct {
     media: ?Media,
     is_video: bool,
 
-    // =================================
-
     pub fn jsonParse(allocator: Allocator, source: anytype, options: ParseOptions) !@This() {
         const Error = ParseError(@TypeOf(source.*));
 
@@ -596,7 +642,10 @@ pub const Link = struct {
         }
 
         var ret: @This() = undefined;
+
         const info = @typeInfo(@This()).Struct;
+        var fields_seen = [_]bool{false} ** info.fields.len;
+
         while (true) {
             const field_name = switch (try source.next()) {
                 .object_end => break,
@@ -604,22 +653,26 @@ pub const Link = struct {
                 else => return Error.UnexpectedToken,
             };
 
-            inline for (info.fields) |field| {
+            inline for (info.fields, 0..) |field, i| {
                 if (mem.eql(u8, field_name, field.name)) {
                     if (field.type == ?MediaEmbeded) {
                         @field(ret, field.name) = try ImplJsonParseEmptyObjectAsNullFn(MediaEmbeded).jsonParse(allocator, source, options);
-                        break;
-                    }
-                    if (mem.eql(u8, field_name, "edited")) {
+                    } else if (mem.eql(u8, field.name, "edited")) {
                         const optional_info = switch (@typeInfo(field.type)) {
                             .Optional => |optional_info| optional_info,
                             else => unreachable,
                         };
                         const T = optional_info.child;
                         @field(ret, field.name) = try ImplJsonParseTokenTypeAsNullFn(.false, T).jsonParse(allocator, source, options);
-                        break;
+                    } else if (field.type == ?[]MediaMetadata and mem.eql(u8, field_name, "media_metadata")) {
+                        // const val = try jsonParseMediaMetadataSlice(allocator, source, options);
+                        // @field(ret, field.name) = val;
+
+                        @field(ret, field.name) = try jsonParseMediaMetadataSlice(allocator, source, options);
+                    } else {
+                        @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
                     }
-                    @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
+                    fields_seen[i] = true;
                     break;
                 }
             } else {
@@ -630,41 +683,102 @@ pub const Link = struct {
                 }
             }
         }
-
+        try fillDefaultStructValues(@This(), &ret, &fields_seen);
         return ret;
     }
 };
 
 pub const Comment = struct {
-    name: String,
-    body: ?String,
+    subreddit_id: String,
+    approved_at_utc: ?Uint,
+    author_is_blocked: bool,
+    // comment_type: null,  // NOTE: unimplemented
+    // awarders: [],  // NOTE: unimplemented
+    // mod_reason_by: null,  // NOTE: unimplemented
+    // banned_by: null,  // NOTE: unimplemented
+    author_flair_type: ?TextType = null,
+    total_awards_received: Uint,
+    subreddit: String,
+    author_flair_template_id: ?String,
+    likes: ?bool,
     replies: ?Thing,
+    // // // user_reports: [], // NOTE: unimplemented
+    saved: bool,
+    id: String,
+    // // banned_at_utc: null, // NOTE: unimplemented
+    // // mod_reason_title: null, // NOTE: unimplemented
+    // // gilded: 0, // NOTE: unimplemented
+    archived: bool,
+    // // collapsed_reason_code: null,  // NOTE: unimplemented
+    no_follow: bool,
     author: String,
+    // // can_mod_post: false,  // NOTE: unimplemented
+    created_utc: Uint,
+    send_replies: bool,
+    parent_id: String,
+    score: Int,
+    author_fullname: ?String = null,
+    approved_by: ?String,
+    // mod_note: null,  // NOTE: unimplemented
+    // all_awardings: [],  // NOTE: unimplemented
+    // collapsed: bool, // NOTE: unimplemented
+    body: String,
+    edited: ?Uint,
+    // top_awarded_type: null, // NOTE: unimplemented
+    // author_flair_css_class: null,  // NOTE: unimplemented
+    name: String,
+    is_submitter: bool,
+    downs: Uint,
+    author_flair_richtext: ?[]FlairRichtext = null,
+    // author_patreon_flair: false, // NOTE: unimplemented
+    body_html: String,
+    // removal_reason: null,  // NOTE: unimplemented
+    // collapsed_reason: null,  // NOTE: unimplemented
+    distinguished: ?Distinguished,
+    // associated_award: null,  // NOTE: unimplemented
+    stickied: bool,
+    author_premium: ?bool = null,
+    // can_gild: false, // NOTE: unimplemented
+    // gildings: {},  // NOTE: unimplemented
+    // unrepliable_reason: null,  // NOTE: unimplemented
+    // author_flair_text_color: null,  // NOTE unimplemented
+    score_hidden: bool,
+    permalink: String,
+    subreddit_type: SubredditType,
+    locked: bool,
+    // report_reasons: null, // NOTE unimplemented
+    created: Uint,
+    media_metadata: ?[]MediaMetadata = null,
+    author_flair_text: ?String,
+    // treatment_tags: [], // NOTE unimplemented
+    link_id: String,
+    subreddit_name_prefixed: String,
+    // controversiality: 0, // NOTE unimplemented
+    depth: Uint,
+    author_flair_background_color: ?String,
+    // collapsed_because_crowd_control: null, // NOTE unimplemented
+    // mod_reports: [],  // NOTE unimplemented
+    // num_reports: null,  // NOTE unimplemented
+    ups: Uint,
 
     pub fn jsonParse(allocator: Allocator, source: anytype, options: ParseOptions) !@This() {
         const Error = ParseError(@TypeOf(source.*));
-
         if (try source.next() != .object_begin) {
             return Error.UnexpectedToken;
         }
-
         var ret: @This() = undefined;
-
         const info = @typeInfo(@This()).Struct;
+        var fields_seen = [_]bool{false} ** info.fields.len;
+
         while (true) {
             const field_name = switch (try source.next()) {
                 .object_end => break,
                 .string => |s| s,
                 else => return Error.UnexpectedToken,
             };
-
-            print("field_name: {s}\n", .{field_name});
-
-            inline for (info.fields) |field| {
+            inline for (info.fields, 0..) |field, i| {
                 if (mem.eql(u8, field_name, field.name)) {
                     if (mem.eql(u8, field.name, "replies")) {
-                        print("replies!!!!!!!!!!\n", .{});
-
                         const optional_info = switch (@typeInfo(field.type)) {
                             .Optional => |optional_info| optional_info,
                             else => unreachable,
@@ -673,22 +787,20 @@ pub const Comment = struct {
                         debug.assert(T == Thing);
 
                         const val = try ImplJsonParseEmptyStringAsNullFn(T).jsonParse(allocator, source, options);
-
-                        // switch (val) {
-
-                        // }
-
-                        print("replies!!!!!!!!!! {any}\n", .{val});
-                        print("type: {any}\n", .{@TypeOf(val)});
-                        print("\n", .{});
-
-                        // @field(ret, field.name) = val;
-
-                        // @field(ret, field.name) = try ImplJsonParseEmptyStringAsNullFn(Thing).jsonParse(allocator, source, options);
-                        break;
+                        @field(ret, field.name) = val;
+                    } else if (mem.eql(u8, field.name, "edited")) {
+                        const optional_info = switch (@typeInfo(field.type)) {
+                            .Optional => |optional_info| optional_info,
+                            else => unreachable,
+                        };
+                        const T = optional_info.child;
+                        @field(ret, field.name) = try ImplJsonParseTokenTypeAsNullFn(.false, T).jsonParse(allocator, source, options);
+                    } else if (field.type == ?[]MediaMetadata and mem.eql(u8, field.name, "media_metadata")) {
+                        @field(ret, field.name) = try jsonParseMediaMetadataSlice(allocator, source, options);
+                    } else {
+                        @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
                     }
-
-                    @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
+                    fields_seen[i] = true;
                     break;
                 }
             } else {
@@ -699,7 +811,7 @@ pub const Comment = struct {
                 }
             }
         }
-
+        try fillDefaultStructValues(@This(), &ret, &fields_seen);
         return ret;
     }
 };
@@ -708,21 +820,40 @@ const print = std.debug.print;
 
 test "asdf" {
     if (true) return error.SkipZigTest;
-    print("\n", .{});
 
-    // const info = @typeInfo(Media).Union;
+    const allocator = std.heap.page_allocator;
+    {
+        var hm1 = std.StringHashMapUnmanaged(MediaMetadata){};
+        var hm2 = std.StringHashMap(MediaMetadata).init(allocator);
+        // var hm = std.StringArrayHashMapUnmanaged(usize){};
+        defer hm1.deinit(allocator);
+        defer hm2.deinit();
 
-    const Foo = union(enum) {
-        a: []const u8,
-        b: struct {
-            x: usize,
-            y: usize,
-        },
-    };
+        print("size usize: {any}\n", .{@sizeOf(usize)});
+        print("size hm1: {any}\n", .{@sizeOf(@TypeOf(hm1))});
+        print("size hm2: {any}\n", .{@sizeOf(@TypeOf(hm2))});
 
-    const x = @unionInit(Foo, "b", .{ .x = 11, .y = 22 });
-    print("{any}\n", .{x});
-    print("{any}\n", .{@TypeOf(x)});
+        // print("cap: {any}\n", .{hm1.capacity()});
+
+        // try hm.ensureTotalCapacity(allocator, 4);
+        try hm1.ensureUnusedCapacity(allocator, 4);
+        try hm2.ensureUnusedCapacity(4);
+
+        print("size hm1: {any}\n", .{@sizeOf(@TypeOf(hm1))});
+        print("size hm2: {any}\n", .{@sizeOf(@TypeOf(hm2))});
+        // try hm.ensureTotalCapacity(4);
+        // try hm.ensure(allocator, 12);
+    }
+
+    {
+        const list = try std.ArrayList(usize).initCapacity(allocator, 3);
+        print("{}\n", .{list.capacity});
+    }
+
+    // print("cap: {any}\n", .{hm1.capacity()});
+
+    // hm.ensureTotalCapacityContext(, , )
+    // hm.ensureTotalCapacity(, )
 
     // const link: Link = undefined;
     // print("{any}\n", .{link.sr_detail});
@@ -736,10 +867,11 @@ test "customize json listing new" {
     const allocator = std.heap.page_allocator;
     // const allocator = std.testing.allocator;
 
+    // const s = @embedFile("testjson/listing_comment_author_deleted.json");
+    const s = @embedFile("testjson/listing_new_dota2.json");
+    // const s = @embedFile("testjson/listing_new_zig.json");
     // const s = @embedFile("testjson/listing_new.json");
     // const s = @embedFile("testjson/listing_new3.json");
-    const s = @embedFile("testjson/listing_new_dota2.json");
-    // const s = @embedFile("testjson/listing_new_simple.json");
     // const s = @embedFile("testjson/listing_new2.json");
 
     const parsed = try json.parseFromSlice(Thing, allocator, s, .{
@@ -752,13 +884,13 @@ test "customize json listing new" {
     const children = parsed.value.listing.children;
     for (children) |thing| {
         const link = thing.link;
-        // print("title: {s}\n", .{link.title});
+        print("title: {s}\n", .{link.title});
         // print("title: {any}\n", .{link.subreddit_type});
         // print("link flair type: {s}\n", .{link.link_flair_richtext});
         // print("sr type: {s}\n", .{link.sr_detail.?.subreddit_type});
         // print("sr_detail: {any}\n", .{link.sr_detail});
 
-        print("media embed: {any}\n", .{link.media_embed});
+        // print("media embed: {any}\n", .{link.media_embed});
 
         // for (link.author_flair_richtext) |flair| {
         //     switch (flair) {
@@ -774,20 +906,30 @@ test "customize json listing new" {
         //     }
         // }
 
+        // link.media_metadata
+        // if (link.media_metadata) |metadata| {
+        //     for (metadata) |mt| {
+        //         print("{any}\n", .{mt});
+        //     }
+
+        // } else {
+        // }
+
         print("==================\n", .{});
     }
 }
 
 test " json listing comments" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     print("\n", .{});
 
     const allocator = std.heap.page_allocator;
     // const allocator = std.testing.allocator;
 
-    // const s = @embedFile("testjson/comments2.json");
-    const s = @embedFile("testjson/comments.json");
+    // const s = @embedFile("testjson/comments.json");
+    const s = @embedFile("testjson/comments4_metadata.json");
+    // const s = @embedFile("testjson/listing_comment_author_deleted.json");
 
     const Model = [2]Thing;
     // _ = Model; // autofix
@@ -798,34 +940,135 @@ test " json listing comments" {
     });
     // const root = parsed.value;
 
-    const thing = parsed.value[1];
+    const root = parsed.value;
 
     print("#######################\n", .{});
+    print("#######################\n", .{});
 
-    recurPrintComments(thing, 0);
+    // print("{any}\n", .{root[0]});
+    // print("{any}\n", .{root[1]});
+
+    {
+        const link_children = root[0].listing.children;
+        _ = link_children; // autofix
+    }
+
+    // {
+    //     const comment_children = root[1].listing.children;
+
+    //     for (comment_children) |child| {
+    //         const comment = child.comment;
+    //         // print("{s}\n", .{comment.body});
+    //         print("{s}\n", .{comment.author});
+
+    //         // for (comment.replies)
+    //         if (comment.replies) |replies_thing| {
+    //             const reply_children = replies_thing.listing.children;
+    //             // print("   {any}\n", .{replies_thing});
+
+    //             for (reply_children) |reply| {
+    //                 const comment2 = reply.comment;
+
+    //                 print("      {s}\n", .{comment2.author});
+    //             }
+    //         }
+    //     }
+    // }
+
+    recurPrintComments(root[1], 0);
+
+    {
+        // const c1 = root[0].listing.children[0].comment;
+
+        // // print("\n")
+        // if (c1.replies) |_thing| {
+        //     // for (replies) |reply| {
+        //     //     print("{}\n", .{reply});
+        //     // }
+
+        //     // print("{any}\n", .{_thing});
+
+        //     switch (_thing) {
+        //         .listing => |listing| {
+        //             const children = listing.children;
+
+        //             for (children) |child_thing| {
+        //                 print("{any}\n", .{child_thing.comment});
+        //             }
+        //         },
+        //         .link => |link| {
+        //             print("{any}\n", .{link});
+        //         },
+
+        //         .comment => |comment| {
+        //             print("{any}\n", .{comment});
+        //         },
+        //         else => {
+        //             // unreachable;
+        //         },
+        //     }
+        // } else {
+        //     print("replies: null\n", .{});
+        // }
+    }
 }
 
 fn recurPrintComments(thing: Thing, level: usize) void {
     //
+
     const children = thing.listing.children;
 
+    const padding = "  > ";
+
     for (children) |child| {
-        const comment = child.comment;
-        // print("{}\")
+        switch (child) {
+            .comment => |comment| {
+                // for (0..level) |_| print("{s}", .{padding});
 
-        for (0..level) |_| {
-            print(" ", .{});
-        }
-        print("{s}: ", .{comment.author});
-        // print("{s}\n", .{comment.body});
-        if (comment.body) |body| {
-            print("{s}", .{body});
-        }
+                print("{s}: ", .{comment.author});
+                print("{s}\n", .{comment.body});
 
-        print("\n", .{});
+                // print("\n", .{});
 
-        if (comment.replies) |replies| {
-            recurPrintComments(replies, level + 1);
+                // for (0..level) |_| print("{s}", .{padding});
+
+                // // print("----------\n", .{});
+
+                // if (comment.replies) |reply| {
+                //     recurPrintComments(reply, level + 1);
+                // }
+
+                // print("{}\n", .{comment.media_metadata});
+
+                if (comment.media_metadata) |metadata| {
+                    // print("{}\n", .{metadata});
+                    for (metadata) |mt| {
+                        print("{any}\n", .{mt});
+                        //
+                    }
+                }
+            },
+            .more => |more| {
+                //
+
+                for (0..level) |_| print("{s}", .{padding});
+
+                print("more: \n", .{});
+
+                for (more.children) |reply| {
+                    print("{s}, ", .{reply});
+                }
+
+                print("\n", .{});
+
+                for (0..level) |_| print("{s}", .{padding});
+
+                // print("----------\n", .{});
+            },
+            else => unreachable,
         }
     }
+
+    for (0..level) |_| print("{s}", .{padding});
+    print("-------------\n", .{});
 }

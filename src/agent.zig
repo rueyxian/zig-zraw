@@ -73,7 +73,8 @@ pub const Authorization = struct {
             var response_buffer = std.ArrayList(u8).init(fballoc);
             break :blk try request.fetch(&client, .{ .dynamic = &response_buffer });
         };
-        const parsed = try model.parse(api.AccessToken.Model, fballoc, response.payload);
+        const parsed = try json.parseFromSlice(api.AccessToken.Model, fballoc, response.payload, .{});
+        // const parsed = try model.parse(api.AccessToken.Model, fballoc, response.payload);
         defer parsed.deinit();
         const authorization = try fmt.allocPrint(allocator, "{s} {s}", .{ parsed.value.token_type, parsed.value.access_token });
         return Self{
@@ -214,7 +215,10 @@ pub fn AgentUnmanaged(comptime buffer_type: AgentBufferType) type {
             api.verifyEndpoint(@TypeOf(endpoint));
             const response = try self.fetchBytesWithEndpoint(endpoint);
             defer response.deinit();
-            return model.parse(@TypeOf(endpoint).Model, allocator, response.payload);
+            // return model.parse(@TypeOf(endpoint).Model, allocator, response.payload);
+            return json.parseFromSlice(@TypeOf(endpoint).Model, allocator, response.payload, .{
+                .ignore_unknown_fields = true,
+            });
         }
 
         pub fn fetchBytesWithEndpoint(self: *Self, endpoint: anytype) !ApiResponse {
@@ -235,7 +239,9 @@ pub fn AgentUnmanaged(comptime buffer_type: AgentBufferType) type {
             api.verifyContext(@TypeOf(context));
             const response = try self.fetchBytesWithContext(allocator, context);
             defer response.deinit();
-            return model.parse(@TypeOf(context).Model, allocator, response.payload);
+            return json.parseFromSlice(@TypeOf(context).Model, allocator, response.payload, .{
+                .ignore_unknown_fields = true,
+            });
         }
 
         pub fn fetchBytesWithContext(self: *Self, allocator: Allocator, context: anytype) !ApiResponse {
@@ -265,6 +271,7 @@ test "xoiuer" {
 
     // verifyEndpoint();
     const Context = api.ListingNew("zig");
+    // const Context = api.ListingNew("dota2");
 
     // const parsed = try agent.fetchModelWithContext(Context, allocator, Context{
     //     .count = 3,
@@ -326,8 +333,8 @@ test "auth" {
     // var agent = auth.agent(allocator, null, .dynamic);
     // const buffer_type: AgentBufferType ;
     // var agent = auth.agent_unmanaged(allocator, null, .{ .static = 1024 * 1024 });
-    var agent = auth.agent(allocator, null, .{ .static = 1024 * 1024 });
-    // var agent = auth.agent(allocator, null, .dynamic);
+    // var agent = auth.agent(allocator, null, .{ .static = 1024 * 1024 });
+    var agent = auth.agent(allocator, null, .dynamic);
     defer agent.deinit();
 
     {

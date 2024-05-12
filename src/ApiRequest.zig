@@ -25,8 +25,6 @@ pub const ApiResponse = struct {
     payload: []const u8,
     allocator: ?Allocator = null,
 
-    pub const ParseError = std.json.ParseError(json.Scanner);
-
     pub fn deinit(self: *const ApiResponse) void {
         if (self.allocator) |allocator| {
             allocator.free(self.payload);
