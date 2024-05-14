@@ -28,13 +28,7 @@ pub const ListingComments = listing.ListingComments;
 pub const domain_www = "https://www.reddit.com/";
 pub const domain_oauth = "https://oauth.reddit.com/";
 
-// pub const EndpointError = error{
-//     InvalidEndpointContext,
-// };
-
-pub const EndpointError = Allocator.Error || std.io.FixedBufferStream([]u8).WriteError;
-
-pub const FetchError = EndpointError || ApiRequest.HttpError;
+pub const FetchError = ApiRequest.HttpError || Allocator.Error;
 
 pub const Sort = enum {
     hot,
@@ -52,70 +46,9 @@ pub const Time = enum {
     all,
 };
 
-// pub const IdentifiedType = enum {
-//     endpoint,
-//     context,
-//     invalid,
-// };
-
-// pub fn identifyType(comptime T: type) IdentifiedType {
-//     // const info = @typeInfo(T);
-//     // _ = info; // autofix
-//     // debug.assert(info == .Struct);
-//     if (isEndpoint(T)) {
-//         return .endpoint;
-//     } else if (isContext(T)) {
-//         return .endpoint;
-//     }
-//     return .invalid;
-// }
-
-pub fn verifyEndpointOrContext(comptime EndpointOrContext: type) void {
-    if (isEndpoint(EndpointOrContext)) return;
-    if (isContext(EndpointOrContext)) return;
-    @panic("Invalid endpoint or context type.");
-
-    // const msg = "Invalid endpoint or context type. " ++ "Cannot use " ++ @typeName(EndpointOrContext);
-    // if (@inComptime()) {
-    //     @compileError(msg);
-    // } else {
-    //     @panic(msg);
-    // }
-
-}
-
-pub fn verifyEndpoint(comptime EndpointType: type) void {
-    if (isEndpoint(EndpointType)) return;
-    @panic("Invalid endpoint type.");
-
-    // const msg = "Invalid endpoint type. " ++ "Cannot use " ++ @typeName(EndpointType);
-    // if (@inComptime()) {
-    //     @compileError(msg);
-    // } else {
-    //     @panic(msg);
-    // }
-}
-
 pub fn verifyContext(comptime Context: type) void {
     if (isContext(Context)) return;
     @panic("Invalid context type.");
-
-    // @panic("Invalid context type. " ++ "Cannot use " ++ @typeName(Context));
-    // @compileError();
-
-    // const msg = "Invalid context type. " ++ "Cannot use " ++ @typeName(Context);
-    // if (@inComptime()) {
-    //     @compileError(msg);
-    // } else {
-    //     @panic(msg);
-    // }
-}
-
-pub fn isEndpoint(comptime EndpointType: type) bool {
-    const info = @typeInfo(EndpointType);
-    if (info != .Struct) return false;
-    if (@hasDecl(EndpointType, "Model") == false) return false;
-    return Endpoint(EndpointType.Model) == EndpointType;
 }
 
 pub fn isContext(comptime Context: type) bool {
@@ -144,74 +77,51 @@ pub fn isContext(comptime Context: type) bool {
     return true;
 }
 
-// pub fn verifyEndpoint(comptime EndpointType: type) void {
-//     if (isEndpoint(EndpointType)) return;
-//     @compileError("Invalid endpoint type");
-// }
-
-// pub fn verifyContext(comptime Context: type) void {
-//     if (isContext(Context)) return;
-//     @compileError("Invalid context type");
-// }
-
-pub fn endpointFromContext(allocator: Allocator, context: anytype) EndpointError!Endpoint(@TypeOf(context).Model) {
+pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowString {
     const Context = @TypeOf(context);
     verifyContext(Context);
     const info = @typeInfo(Context);
     debug.assert(info == .Struct);
     const fields = info.Struct.fields;
-    if (fields.len == 0) {
-        const url = CowString.borrowed(Context.url);
-        return Endpoint(Context.Model){
-            .url = url,
-            .method = Context.method,
-        };
-    }
-    const buf = try allocator.alloc(u8, fullEndpointLength(context));
-    var fbs = std.io.fixedBufferStream(buf);
-    const w = fbs.writer();
-    try w.writeAll(Context.url);
-
-    var param_count: usize = 0;
+    var buf = std.ArrayList(u8).init(allocator);
+    var writer = buf.writer();
+    var has_param: bool = false;
     inline for (fields) |field| {
         if (@field(context, field.name)) |val| {
-            try w.writeByte(([_]u8{ '?', '&' })[@intFromBool(param_count != 0)]);
-            try w.writeAll(field.name);
-            try w.writeByte('=');
-
-            // const fn_name = blk: {
-            //     const field_name = field.name;
-            //   break :blk;
-            // };
+            if (has_param == false) {
+                try writer.writeAll(Context.url);
+                try writer.writeByte('?');
+                has_param = true;
+            } else {
+                try writer.writeByte('&');
+            }
+            // try writer.writeByte(([_]u8{ '?', '&' })[@intFromBool(param_count != 0)]);
+            try writer.writeAll(field.name);
+            try writer.writeByte('=');
 
             const write_param_value_fn_name = getWriteParamValueFnName(field.name);
 
             if (@hasDecl(Context, write_param_value_fn_name)) {
-                @field(Context, write_param_value_fn_name)(w);
-                continue;
+                try @field(Context, write_param_value_fn_name)(&context, writer);
+            } else {
+                switch (@typeInfo(@TypeOf(val))) {
+                    .Bool => try writer.writeAll((&[_]u8{ "false", "true" })[@intFromBool(val)]),
+                    .Pointer => |ptr_info| {
+                        debug.assert(ptr_info.size == .Slice);
+                        debug.assert(ptr_info.is_const == true);
+                        debug.assert(ptr_info.child == u8);
+                        try writer.writeAll(val);
+                    },
+                    .Int => try writer.print("{}", .{val}),
+                    else => unreachable,
+                }
             }
-
-            // TODO CONTINUE HERE
-
-            switch (@TypeOf(val)) {
-                bool => try w.writeByte((&[_]u8{ '0', '1' })[@intFromBool(val)]),
-                []const u8 => try w.writeAll(val),
-                u64 => {
-                    var _buf: [maxUintLength(u64)]u8 = undefined;
-                    const s = try std.fmt.bufPrint(&_buf, "{}", .{val});
-                    try w.writeAll(s);
-                },
-                else => unreachable,
-            }
-            param_count += 1;
         }
     }
-    debug.assert(try fbs.getPos() == buf.len);
-    const url = CowString.owned(fbs.getWritten());
-    return Endpoint(Context.Model){
-        .url = url,
-        .method = Context.method,
-    };
+    if (has_param) {
+        return CowString.owned(try buf.toOwnedSlice());
+    }
+    return CowString.borrowed(Context.url);
 }
 
 fn writeFromSnakeToPascal(writer: anytype, s: []const u8) !void {
@@ -232,14 +142,14 @@ fn writeFromSnakeToPascal(writer: anytype, s: []const u8) !void {
 inline fn getWriteParamValueFnName(comptime field_name: []const u8) []const u8 {
     comptime {
         var buffer: ty: {
-            var len = "writeParamValue".len;
+            var len = "_writeParamValue".len;
             for (field_name) |byte| {
                 if (byte != '_') len += 1;
             }
             break :ty [len]u8;
         } = undefined;
         var fbs = std.io.fixedBufferStream(&buffer);
-        fbs.writer().writeAll("writeParamValue") catch unreachable;
+        fbs.writer().writeAll("_writeParamValue") catch unreachable;
         writeFromSnakeToPascal(fbs.writer(), field_name) catch unreachable;
         return fbs.getWritten();
     }
@@ -263,222 +173,47 @@ const BytesIterator = struct {
     }
 };
 
-pub fn getEndpoint(allocator: Allocator, context: anytype) EndpointError!Endpoint(@TypeOf(context).Model) {
-    const Context = @TypeOf(context);
-    // if (isContext(Context) == false) {
-    //     @panic("Invalid context type");
-    // }
-    verifyContext(Context);
-    const info = @typeInfo(Context);
-    debug.assert(info == .Struct);
-    const fields = info.Struct.fields;
-    if (fields.len == 0) {
-        const url = CowString.borrowed(Context.url);
-        return Endpoint(Context.Model){
-            .url = url,
-            .method = Context.method,
-        };
-    }
-    const buf = try allocator.alloc(u8, fullEndpointLength(context));
-    var fbs = std.io.fixedBufferStream(buf);
-    const w = fbs.writer();
-    try w.writeAll(Context.url);
-
-    var i: usize = 0;
-    inline for (fields) |field| {
-        if (@field(context, field.name)) |val| {
-            try w.writeByte(([_]u8{ '?', '&' })[@intFromBool(i != 0)]);
-            try w.writeAll(field.name);
-            try w.writeByte('=');
-            switch (@TypeOf(val)) {
-                bool => try w.writeByte((&[_]u8{ '0', '1' })[@intFromBool(val)]),
-                []const u8 => try w.writeAll(val),
-                u64 => {
-                    var _buf: [maxUintLength(u4)]u8 = undefined;
-                    const s = try std.fmt.bufPrint(&_buf, "{}", .{val});
-                    try w.writeAll(s);
-                },
-                else => unreachable,
-            }
-            i += 1;
-        }
-    }
-    debug.assert(try fbs.getPos() == buf.len);
-    const url = CowString.owned(fbs.getWritten());
-    return Endpoint(Context.Model){
-        .url = url,
-        .method = Context.method,
-    };
-}
-
-pub const FetchOptions = struct {
+pub const ContextFetchOptions = struct {
     client: *Client,
     response_buffer: ResponseBuffer,
-    // response_storage: ResponseStorage,
     user_agent: []const u8,
     authorization: []const u8,
     payload: ?[]const u8,
 };
 
-pub fn Endpoint(comptime ModelType: type) type {
+pub fn MixinContexFetch(comptime Context: type) type {
+    verifyContext(Context);
     return struct {
-        url: CowString,
-        method: Method,
+        pub fn fetch(ctx: Context, allocator: Allocator, options: ContextFetchOptions) FetchError!ApiResponse {
+            // var request = try ApiRequest.fromContext(allocator, ctx);
 
-        pub const Self = @This();
-        pub const Model = ModelType;
+            const url = try stringifyUrlFromContext(allocator, ctx);
+            defer url.deinit(allocator);
 
-        pub fn deinit(self: Self, allocator: Allocator) void {
-            self.url.deinit(allocator);
-        }
-
-        /// WARNING: Not intended for use at the client level.
-        pub fn fetchAdaptor(self: *const Self, _: Allocator, options: FetchOptions) FetchError!ApiResponse {
-            const request = ApiRequest{
-                .uri = self.url.value,
-                .method = self.method,
+            var request = ApiRequest{
+                .url = url.value,
+                .method = @TypeOf(ctx).method,
                 .user_agent = options.user_agent,
                 .authorization = options.authorization,
                 .payload = options.payload,
             };
+
             return request.fetch(options.client, options.response_buffer);
         }
     };
 }
 
-// pub fn Endpoint(comptime ModelType: type) type {
-//     return struct {
-//         url: CowString,
-//         method: Method,
+test "asdlkfj" {
+    // const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
 
-//         pub const Self = @This();
-//         pub const Model = ModelType;
-
-//         pub fn deinit(self: Self, allocator: Allocator) void {
-//             self.url.deinit(allocator);
-//         }
-
-//         pub fn fetchAdaptor(self: *const Self, _: Allocator, options: FetchOptions) ApiRequest.Error!ApiResponse {
-//             const request = ApiRequest{
-//                 .uri = self.url.value,
-//                 .method = self.method,
-//                 .user_agent = options.user_agent,
-//                 .authorization = options.authorization,
-//                 .payload = options.payload,
-//             };
-//             return request.fetch(options.client, options.response_buffer);
-//         }
-//     };
-// }
-
-pub fn MixinContextFetchAdaptor(comptime Context: type) type {
-    return struct {
-        /// WARNING: Not intended for use at the client level.
-        pub fn fetchAdapter(ctx: *const Context, allocator: Allocator, options: FetchOptions) FetchError!ApiResponse {
-            const endpoint = try getEndpoint(allocator, ctx.*);
-            defer endpoint.deinit(allocator);
-            return endpoint.fetchAdaptor(undefined, options);
-        }
+    const context = ListingNew("zig"){
+        // .count = 3,
+        // .limit = 9,
     };
+
+    const url = try stringifyUrlFromContext(allocator, context);
+    // defer url.deinit(allocator);
+
+    std.debug.print("url: {s}\n", .{url.value});
 }
-
-// pub fn getContextFetchAdaptorFn(comptime Context: type) fn (*const Context, Allocator, FetchOptions) (FetchError!ApiResponse) {
-//     return struct {
-//         /// WARNING: Not intended for use at the client level.
-//         fn f(ctx: *const Context, allocator: Allocator, options: FetchOptions) FetchError!ApiResponse {
-//             const endpoint = try getEndpoint(allocator, ctx.*);
-//             defer endpoint.deinit(allocator);
-//             return endpoint.fetchAdaptor(undefined, options);
-//         }
-//     }.f;
-// }
-
-// pub fn contextFetchAdaptor(context: *const @This(), allocator: Allocator, options: FetchOptions) ApiRequest.HttpError!ApiResponse {
-//     const endpoint = try getEndpoint(allocator, context);
-//     endpoint.fetchAdaptor(undefined, options);
-// }
-
-// pub fn ImplFetchAdaptorFn(comptime Context: type) type {
-//     return struct {
-//         pub fn fetchAdaptor(context: *const Context, allocator: Allocator, options: FetchOptions) !ApiResponse {
-//             const endpoint = try getEndpoint(allocator, context.*);
-//             defer endpoint.deinit(allocator);
-//             const request = ApiRequest{
-//                 .uri = endpoint.url.value,
-//                 .method = endpoint.method,
-//                 .user_agent = options.user_agent,
-//                 .authorization = options.authorization,
-//                 .payload = options.payload,
-//             };
-//             return request.fetch(options.client, options.response_buffer);
-//         }
-//     };
-// }
-
-fn fullEndpointLength(context: anytype) usize {
-    const Context = @TypeOf(context);
-    const info = @typeInfo(Context);
-    debug.assert(info == .Struct);
-    var res = Context.url.len;
-    const fields = info.Struct.fields;
-
-    inline for (fields) |field| {
-        if (@field(context, field.name)) |val| {
-            res += 2; // ('?' or '&') + '='
-            res += field.name.len;
-            switch (@TypeOf(val)) {
-                bool => res += 1, // bool will convert to '0' or '1',
-                []const u8 => res += val.len,
-                u64 => res += uintLength(u64, val),
-                else => unreachable,
-            }
-        }
-    }
-    return res;
-}
-
-pub fn maxUintLength(comptime T: type) usize {
-    const info = @typeInfo(T);
-    debug.assert(info == .Int);
-    debug.assert(info.Int.signedness == .unsigned);
-    comptime var res: usize = 0;
-    comptime var num = std.math.maxInt(T);
-    inline while (num != 0) {
-        num /= 10;
-        res += 1;
-    }
-    return res;
-}
-
-fn uintLength(comptime T: type, number: T) usize {
-    const info = @typeInfo(T);
-    debug.assert(info == .Int);
-    debug.assert(info.Int.signedness == .unsigned);
-    const pow_tens = blk: {
-        var tens: [maxUintLength(T) - 1]T = undefined;
-        inline for (&tens, 1..) |*n, i| {
-            n.* = std.math.pow(T, 10, i);
-        }
-        break :blk tens;
-    };
-    var i: usize = 1;
-    for (pow_tens) |n| {
-        if (number < n) break;
-        i += 1;
-    }
-    return i;
-}
-
-// test "asdlkfj" {
-//     const allocator = std.heap.page_allocator;
-
-//     // const x =
-
-//     const context = ListingNew("zig"){
-//         .count = 3,
-//     };
-
-//     const endpoint = try getEndpoint(allocator, context);
-
-//     std.debug.print("{s}\n", .{endpoint.url.value});
-// }

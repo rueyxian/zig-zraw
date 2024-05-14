@@ -11,6 +11,4 @@ pub const AccountMe = struct {
     pub const url = domain_oauth ++ "api/v1/me";
     pub const method = Method.GET;
     pub const Model = Thing;
-
-    // pub const fetch = api.contextFetchFn;
 };

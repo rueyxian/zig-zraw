@@ -125,6 +125,6 @@ fn testOpitonsInit() !TestOptions {
 
     const platform = @tagName(@import("builtin").os.tag);
     const version = "0.0.0";
-    opts.user_agent = try fmt.allocPrint(allocator, "{s}:{s}:{s} (by /u/<{s}>)", .{ platform, opts.app_id, version, opts.user_id });
+    opts.user_agent = try fmt.allocPrint(allocator, "{s}:zig-zraw:{s} (by /u/<{s}>)", .{ platform, version, opts.user_id });
     return opts;
 }

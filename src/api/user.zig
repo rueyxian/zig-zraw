@@ -23,6 +23,6 @@ pub fn UserComments(comptime subreddit: []const u8) type {
         pub const url = domain_oauth ++ "r/" ++ subreddit ++ "/new";
         pub const method = Method.GET;
         pub const Model = Thing;
-        pub usingnamespace api.MixinContextFetchAdaptor(@This());
+        pub usingnamespace api.MixinContexFetch(@This());
     };
 }

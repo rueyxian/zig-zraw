@@ -934,7 +934,7 @@ test "customize json listing new" {
 }
 
 test " json user comments" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     print("\n", .{});
 

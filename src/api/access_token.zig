@@ -2,7 +2,8 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Method = std.http.Method;
 
-const domain_www = @import("../api.zig").domain_www;
+const api = @import("../api.zig");
+const domain_www = api.domain_www;
 
 pub const AccessToken = struct {
     pub const url = domain_www ++ "api/v1/access_token";
@@ -13,32 +14,22 @@ pub const AccessToken = struct {
         expires_in: u64,
         scope: []const u8,
     };
+
+    pub usingnamespace api.MixinContexFetch(@This());
 };
 
-// fn MixinPayload(comptime Payload: type) type {
-//     return struct {
-//         var owned: bool = false;
-//         pub fn deinit(self: *Payload, allocator: Allocator) void {
-//             _ = self;
-//             _ = allocator;
+pub const RevokeToken = struct {
+    token: []const u8,
+    token_type: []const u8,
 
-//             //
-//         }
-//     };
-// }
+    pub const url = domain_www ++ "api/v1/revoke_token";
+    pub const method: Method = .POST;
+    // pub const Model = struct {
+    //     access_token: []const u8,
+    //     token_type: []const u8,
+    //     expires_in: u64,
+    //     scope: []const u8,
+    // };
 
-// test "asdf" {
-//     const payload = AccessToken.Payload{
-//         .access_token = "asdf",
-//         .token_type = "haha",
-//         .expires_in = 42,
-//         .scope = "*",
-//     };
-//     _ = payload;
-
-//     // AccessToken.Payload.
-
-//     // payload.deinit()
-
-//     // std.debug.print("{any}\n", .{payload});
-// }
+    pub usingnamespace api.MixinContexFetch(@This());
+};

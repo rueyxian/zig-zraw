@@ -3,9 +3,13 @@ const json = std.json;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const Client = std.http.Client;
+const Headers = std.http.Client.Request.Headers;
 const Method = std.http.Method;
 const ResponseStorage = std.http.Client.FetchOptions.ResponseStorage;
-const Parsed = std.json.Parsed;
+// const Parsed = std.json.Parsed;
+
+// const CowString = @import("CowString.zig");
+const api = @import("api.zig");
 
 // TODO to be more specific
 pub const HttpError = error{
@@ -15,11 +19,12 @@ pub const HttpError = error{
 
 const ApiRequest = @This();
 
-uri: []const u8,
+url: []const u8,
 method: Method,
-user_agent: []const u8,
-authorization: []const u8,
-payload: ?[]const u8,
+user_agent: ?[]const u8 = null,
+authorization: ?[]const u8 = null,
+// headers: Headers = Headers{},
+payload: ?[]const u8 = null,
 
 pub const ApiResponse = struct {
     payload: []const u8,
@@ -44,15 +49,15 @@ pub const ResponseBuffer = union(enum) {
     static: []u8,
 };
 
-pub fn fetch(request: *const ApiRequest, client: *Client, response_buffer: ResponseBuffer) HttpError!ApiResponse {
-    const headers = std.http.Client.Request.Headers{
-        .authorization = .{ .override = request.authorization },
-        .user_agent = .{ .override = request.user_agent },
-    };
+pub fn fetch(self: *const ApiRequest, client: *Client, response_buffer: ResponseBuffer) HttpError!ApiResponse {
+    var headers = Headers{};
+    if (self.authorization) |authorization| headers.authorization = .{ .override = authorization };
+    if (self.user_agent) |user_agent| headers.user_agent = .{ .override = user_agent };
+
     var fetch_options = std.http.Client.FetchOptions{
-        .location = .{ .url = request.uri },
-        .method = request.method,
-        .payload = request.payload,
+        .location = .{ .url = self.url },
+        .method = self.method,
+        .payload = self.payload,
         .headers = headers,
     };
     const payload = switch (response_buffer) {
@@ -77,47 +82,3 @@ pub fn fetch(request: *const ApiRequest, client: *Client, response_buffer: Respo
     };
     return ApiResponse{ .payload = payload };
 }
-
-// pub fn fetch(request: *const ApiRequest, client: *Client, response_storage: ResponseStorage) HttpError!ApiResponse {
-//     const headers = std.http.Client.Request.Headers{
-//         .authorization = .{ .override = request.authorization },
-//         .user_agent = .{ .override = request.user_agent },
-//     };
-//     const fetch_options = std.http.Client.FetchOptions{
-//         .location = .{ .url = request.uri },
-//         .method = request.method,
-//         .payload = request.payload,
-//         .headers = headers,
-//         .response_storage = response_storage,
-//     };
-//     const result = client.fetch(fetch_options) catch return HttpError.ToBeDefined;
-//     if (result.status != .ok) {
-//         return HttpError.InvalidStatus;
-//     }
-//     const payload = switch (response_storage) {
-//         inline .static, .dynamic => |buffer| buffer.items,
-//         else => unreachable,
-//     };
-
-//     // const payload = switch (response_buffer) {
-//     //     .dynamic => |buffer| blk: {
-//     //         fetch_options.response_storage = .{ .dynamic = buffer };
-//     //         const result = client.fetch(fetch_options) catch return HttpError.ToBeDefined;
-//     //         if (result.status != .ok) {
-//     //             return HttpError.InvalidStatus;
-//     //         }
-//     //         break :blk buffer.items;
-//     //     },
-//     //     .static => |buf| blk: {
-//     //         var fba = std.heap.FixedBufferAllocator.init(buf);
-//     //         var buffer = std.ArrayListUnmanaged(u8).initCapacity(fba.allocator(), buf.len) catch unreachable;
-//     //         fetch_options.response_storage = .{ .static = &buffer };
-//     //         const result = client.fetch(fetch_options) catch return HttpError.ToBeDefined;
-//     //         if (result.status != .ok) {
-//     //             return HttpError.InvalidStatus;
-//     //         }
-//     //         break :blk buffer.items;
-//     //     },
-//     // };
-//     return ApiResponse{ .payload = payload };
-// }
