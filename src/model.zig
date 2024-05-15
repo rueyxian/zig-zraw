@@ -941,8 +941,8 @@ test " json user comments" {
     const allocator = std.heap.page_allocator;
     // const allocator = std.testing.allocator;
 
-    // const s = @embedFile("testjson/comments.json");
-    const s = @embedFile("testjson/user_comment.json");
+    // const s = @embedFile("testjson/user_comment.json");
+    const s = @embedFile("testjson/user_comment_spez.json");
     // const s = @embedFile("testjson/listing_comment_author_deleted.json");
 
     const Model = Thing;
@@ -966,20 +966,21 @@ test " json user comments" {
 
         for (comment_children) |child| {
             const comment = child.comment;
-            // print("{s}\n", .{comment.body});
-            print("{s}\n", .{comment.author});
+            print("{s}\n", .{comment.body});
+            // print("{s}\n", .{comment.author});
 
             // for (comment.replies)
-            if (comment.replies) |replies_thing| {
-                const reply_children = replies_thing.listing.children;
-                // print("   {any}\n", .{replies_thing});
+            // if (comment.replies) |replies_thing| {
+            //     const reply_children = replies_thing.listing.children;
+            //     // print("   {any}\n", .{replies_thing});
 
-                for (reply_children) |reply| {
-                    const comment2 = reply.comment;
+            //     for (reply_children) |reply| {
+            //         const comment2 = reply.comment;
+            //         _ = comment2; // autofix
 
-                    print("      {s}\n", .{comment2.author});
-                }
-            }
+            //         // print("      {s}\n", .{comment2.author});
+            //     }
+            // }
         }
     }
 

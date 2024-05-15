@@ -9,9 +9,6 @@ const domain_oauth = api.domain_oauth;
 const Thing = model.Thing;
 // const api = @import("../api.zig");
 
-const ApiRequest = @import("../ApiRequest.zig");
-const ApiResponse = ApiRequest.ApiResponse;
-
 pub fn ListingNew(comptime subreddit: []const u8) type {
     return struct {
         after: ?[]const u8 = null,

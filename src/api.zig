@@ -10,10 +10,9 @@ const Client = std.http.Client;
 // const CowBytes = @import("cow_bytes.zig").CowBytes;
 const CowString = @import("CowString.zig");
 
-const ApiRequest = @import("ApiRequest.zig");
-const ApiResponse = ApiRequest.ApiResponse;
-const RequestError = ApiRequest.HttpError;
-const ResponseBuffer = ApiRequest.ResponseBuffer;
+const Request = @import("Request.zig");
+const Response = Request.Response;
+const ResponseBuffer = Request.ResponseBuffer;
 
 pub const AccessToken = @import("api/access_token.zig").AccessToken;
 
@@ -25,26 +24,17 @@ pub const ListingNew = listing.ListingNew;
 pub const ListingComments = listing.ListingComments;
 // pub const AccessToken = listing
 
+const user = @import("api/user.zig");
+pub const UserComments = user.UserComments;
+
 pub const domain_www = "https://www.reddit.com/";
 pub const domain_oauth = "https://oauth.reddit.com/";
 
-pub const FetchError = ApiRequest.HttpError || Allocator.Error;
+// pub const FetchError = Request.RequestError || Allocator.Error;
 
-pub const Sort = enum {
-    hot,
-    new,
-    top,
-    controversial,
-};
+pub const Error = ApiError || Request.Error;
 
-pub const Time = enum {
-    hour,
-    day,
-    week,
-    month,
-    year,
-    all,
-};
+const ApiError = error{StringifyUrlError};
 
 pub fn verifyContext(comptime Context: type) void {
     if (isContext(Context)) return;
@@ -77,6 +67,82 @@ pub fn isContext(comptime Context: type) bool {
     return true;
 }
 
+inline fn getWriteParamValueFnName(comptime field_name: []const u8) []const u8 {
+    comptime {
+        var buffer: ty: {
+            var len = "_writeParamValue".len;
+            for (field_name) |byte| {
+                if (byte != '_') len += 1;
+            }
+            break :ty [len]u8;
+        } = undefined;
+        var fbs = std.io.fixedBufferStream(&buffer);
+        fbs.writer().writeAll("_writeParamValue") catch unreachable;
+        writeFromSnakeToPascal(fbs.writer(), field_name) catch unreachable;
+        return fbs.getWritten();
+    }
+}
+
+fn writeFromSnakeToPascal(writer: anytype, s: []const u8) !void {
+    const BytesIterator = struct {
+        bytes: []const u8,
+        pos: usize = 0,
+        pub fn next(self: *@This()) ?u8 {
+            std.debug.assert(self.pos <= self.bytes.len);
+            if (self.pos == self.bytes.len) return null;
+            defer self.pos += 1;
+            return self.bytes[self.pos];
+        }
+        pub fn peek(self: *const @This()) ?u8 {
+            std.debug.assert(self.pos <= self.bytes.len);
+            if (self.pos + 1 == self.bytes.len) return null;
+            return self.bytes[self.pos + 1];
+        }
+    };
+
+    if (s.len == 0) return;
+    try writer.writeByte(std.ascii.toUpper(s[0]));
+    if (s.len == 1) return;
+    var it = BytesIterator{ .bytes = s[1..] };
+    while (it.next()) |byte| {
+        if (byte != '_') {
+            try writer.writeByte(byte);
+            continue;
+        }
+        const bytes2 = std.ascii.toUpper(it.next() orelse break);
+        try writer.writeByte(bytes2);
+    }
+}
+
+pub const ContextFetchOptions = struct {
+    client: *Client,
+    response_buffer: ResponseBuffer,
+    user_agent: []const u8,
+    authorization: []const u8,
+    payload: ?[]const u8,
+};
+
+pub fn MixinContexFetch(comptime Context: type) type {
+    verifyContext(Context);
+    return struct {
+        pub fn fetch(ctx: Context, allocator: Allocator, options: ContextFetchOptions) Error!Response {
+            const url = stringifyUrlFromContext(allocator, ctx) catch return ApiError.StringifyUrlError;
+            defer url.deinit(allocator);
+
+            var request = Request{
+                .url = url.value,
+                .method = @TypeOf(ctx).method,
+                .user_agent = options.user_agent,
+                .authorization = options.authorization,
+                .payload = options.payload,
+            };
+
+            return request.fetch(options.client, options.response_buffer);
+        }
+    };
+}
+
+// TODO private
 pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowString {
     const Context = @TypeOf(context);
     verifyContext(Context);
@@ -105,7 +171,7 @@ pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowStrin
                 try @field(Context, write_param_value_fn_name)(&context, writer);
             } else {
                 switch (@typeInfo(@TypeOf(val))) {
-                    .Bool => try writer.writeAll((&[_]u8{ "false", "true" })[@intFromBool(val)]),
+                    .Bool => try writer.writeAll((&[_][]const u8{ "false", "true" })[@intFromBool(val)]),
                     .Pointer => |ptr_info| {
                         debug.assert(ptr_info.size == .Slice);
                         debug.assert(ptr_info.is_const == true);
@@ -113,6 +179,7 @@ pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowStrin
                         try writer.writeAll(val);
                     },
                     .Int => try writer.print("{}", .{val}),
+                    .Enum => |_| try writer.writeAll(@tagName(val)),
                     else => unreachable,
                 }
             }
@@ -124,96 +191,45 @@ pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowStrin
     return CowString.borrowed(Context.url);
 }
 
-fn writeFromSnakeToPascal(writer: anytype, s: []const u8) !void {
-    if (s.len == 0) return;
-    try writer.writeByte(std.ascii.toUpper(s[0]));
-    if (s.len == 1) return;
-    var it = BytesIterator{ .bytes = s[1..] };
-    while (it.next()) |byte| {
-        if (byte != '_') {
-            try writer.writeByte(byte);
-            continue;
-        }
-        const bytes2 = std.ascii.toUpper(it.next() orelse break);
-        try writer.writeByte(bytes2);
-    }
-}
+// test "asdlkfj" {
+//     // const allocator = std.heap.page_allocator;
+//     const allocator = std.testing.allocator;
 
-inline fn getWriteParamValueFnName(comptime field_name: []const u8) []const u8 {
-    comptime {
-        var buffer: ty: {
-            var len = "_writeParamValue".len;
-            for (field_name) |byte| {
-                if (byte != '_') len += 1;
-            }
-            break :ty [len]u8;
-        } = undefined;
-        var fbs = std.io.fixedBufferStream(&buffer);
-        fbs.writer().writeAll("_writeParamValue") catch unreachable;
-        writeFromSnakeToPascal(fbs.writer(), field_name) catch unreachable;
-        return fbs.getWritten();
-    }
-}
+//     const context = ListingNew("zig"){
+//         // .count = 3,
+//         // .limit = 9,
+//     };
 
-const BytesIterator = struct {
-    bytes: []const u8,
-    pos: usize = 0,
+//     const url = try stringifyUrlFromContext(allocator, context);
+//     // defer url.deinit(allocator);
 
-    pub fn next(self: *@This()) ?u8 {
-        std.debug.assert(self.pos <= self.bytes.len);
-        if (self.pos == self.bytes.len) return null;
-        defer self.pos += 1;
-        return self.bytes[self.pos];
-    }
+//     std.debug.print("url: {s}\n", .{url.value});
+// }
 
-    pub fn peek(self: *const @This()) ?u8 {
-        std.debug.assert(self.pos <= self.bytes.len);
-        if (self.pos + 1 == self.bytes.len) return null;
-        return self.bytes[self.pos + 1];
-    }
-};
+test "asdfasdlkfj" {
+    // if (true) return error.SkipZigTest;
 
-pub const ContextFetchOptions = struct {
-    client: *Client,
-    response_buffer: ResponseBuffer,
-    user_agent: []const u8,
-    authorization: []const u8,
-    payload: ?[]const u8,
-};
-
-pub fn MixinContexFetch(comptime Context: type) type {
-    verifyContext(Context);
-    return struct {
-        pub fn fetch(ctx: Context, allocator: Allocator, options: ContextFetchOptions) FetchError!ApiResponse {
-            // var request = try ApiRequest.fromContext(allocator, ctx);
-
-            const url = try stringifyUrlFromContext(allocator, ctx);
-            defer url.deinit(allocator);
-
-            var request = ApiRequest{
-                .url = url.value,
-                .method = @TypeOf(ctx).method,
-                .user_agent = options.user_agent,
-                .authorization = options.authorization,
-                .payload = options.payload,
-            };
-
-            return request.fetch(options.client, options.response_buffer);
-        }
-    };
-}
-
-test "asdlkfj" {
     // const allocator = std.heap.page_allocator;
     const allocator = std.testing.allocator;
 
-    const context = ListingNew("zig"){
+    const context = UserComments("spez"){
+        .sort = .hot,
+        .t = .week,
         // .count = 3,
         // .limit = 9,
     };
 
     const url = try stringifyUrlFromContext(allocator, context);
-    // defer url.deinit(allocator);
+    defer url.deinit(allocator);
 
     std.debug.print("url: {s}\n", .{url.value});
+
+    const Foo = enum {
+        aaa,
+        bbb,
+        ccc,
+    };
+    _ = Foo; // autofix
+
+    // std.debug.print("foo: {s}\n", .{@tagName(Foo.bbb)});
 }
