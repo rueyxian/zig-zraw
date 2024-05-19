@@ -16,16 +16,13 @@ const ResponseBuffer = Request.ResponseBuffer;
 
 pub const AccessToken = @import("api/access_token.zig").AccessToken;
 
-const account = @import("api/account.zig");
-pub const AccountMe = account.AccountMe;
+pub const AccountMe = @import("api/account.zig").AccountMe;
 
-const listing = @import("api/listing.zig");
-pub const ListingNew = listing.ListingNew;
-pub const ListingComments = listing.ListingComments;
+pub const ListingNew = @import("api/listing.zig").ListingNew;
+pub const ListingComments = @import("api/listing.zig").ListingComments;
 // pub const AccessToken = listing
 
-const user = @import("api/user.zig");
-pub const UserComments = user.UserComments;
+pub const UserComments = @import("api/user.zig").UserComments;
 
 pub const domain_www = "https://www.reddit.com/";
 pub const domain_oauth = "https://oauth.reddit.com/";
@@ -70,14 +67,14 @@ pub fn isContext(comptime Context: type) bool {
 inline fn getWriteParamValueFnName(comptime field_name: []const u8) []const u8 {
     comptime {
         var buffer: ty: {
-            var len = "_writeParamValue".len;
+            var len = "writeParamValue".len;
             for (field_name) |byte| {
                 if (byte != '_') len += 1;
             }
             break :ty [len]u8;
         } = undefined;
         var fbs = std.io.fixedBufferStream(&buffer);
-        fbs.writer().writeAll("_writeParamValue") catch unreachable;
+        fbs.writer().writeAll("writeParamValue") catch unreachable;
         writeFromSnakeToPascal(fbs.writer(), field_name) catch unreachable;
         return fbs.getWritten();
     }
@@ -142,8 +139,7 @@ pub fn MixinContexFetch(comptime Context: type) type {
     };
 }
 
-// TODO private
-pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowString {
+fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowString {
     const Context = @TypeOf(context);
     verifyContext(Context);
     const info = @typeInfo(Context);
@@ -207,16 +203,21 @@ pub fn stringifyUrlFromContext(allocator: Allocator, context: anytype) !CowStrin
 // }
 
 test "asdfasdlkfj" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     // const allocator = std.heap.page_allocator;
     const allocator = std.testing.allocator;
 
-    const context = UserComments("spez"){
-        .sort = .hot,
-        .t = .week,
-        // .count = 3,
-        // .limit = 9,
+    // const context = UserComments("spez"){
+    //     .sort = .hot,
+    //     .t = .week,
+    //     // .count = 3,
+    //     // .limit = 9,
+    // };
+
+    const context = ListingNew("zig"){
+        .count = 3,
+        .limit = 109,
     };
 
     const url = try stringifyUrlFromContext(allocator, context);

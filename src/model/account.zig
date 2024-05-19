@@ -1,16 +1,16 @@
 const std = @import("std");
 const json = std.json;
 const mem = std.mem;
+const debug = std.debug;
 const Allocator = std.mem.Allocator;
 const ParseOptions = std.json.ParseOptions;
 const ParseError = std.json.ParseError;
 
 const model = @import("../model.zig");
-
-const Int = i64;
-const Uint = u64;
-const Float = f64;
-const String = []const u8;
+const Int = model.Int;
+const Uint = model.Uint;
+const Float = model.Float;
+const String = model.String;
 
 pub const Features = struct {
 
@@ -146,7 +146,7 @@ pub const AccountMe = struct {
     is_gold: bool,
     is_mod: bool,
     awarder_karma: Uint,
-    // suspension_expiration_utc: null,  // NOTE: unimplemented
+    // // suspension_expiration_utc: null,  // NOTE: unimplemented
     has_verified_email: bool,
     is_suspended: bool,
     pref_video_autoplay: bool,
@@ -179,48 +179,54 @@ pub const AccountMe = struct {
     comment_karma: Uint,
     accept_followers: bool,
     has_subscribed: bool,
-    // linked_identities: [],  // NOTE: unimplemented
+    // // linked_identities: [],  // NOTE: unimplemented
     seen_subreddit_chat_ftux: bool,
 
-    // pub fn jsonParse(allocator: Allocator, source: anytype, options: ParseOptions) !@This() {
-    //     const Error = ParseError(@TypeOf(source.*));
+    pub fn jsonParse(allocator: Allocator, source: anytype, options: ParseOptions) !@This() {
+        const Error = ParseError(@TypeOf(source.*));
 
-    //     if (try source.next() != .object_begin) {
-    //         return Error.UnexpectedToken;
-    //     }
+        if (try source.next() != .object_begin) {
+            return Error.UnexpectedToken;
+        }
 
-    //     var ret: @This() = undefined;
+        var ret: @This() = undefined;
 
-    //     const info = @typeInfo(@This()).Struct;
-    //     var fields_seen = [_]bool{false} ** info.fields.len;
+        const info = @typeInfo(@This()).Struct;
+        var fields_seen = [_]bool{false} ** info.fields.len;
 
-    //     while (true) {
-    //         const field_name = switch (try source.next()) {
-    //             .object_end => break,
-    //             .string => |s| s,
-    //             else => return Error.UnexpectedToken,
-    //         };
+        while (true) {
+            const field_name = switch (try source.next()) {
+                .object_end => break,
+                .string => |s| s,
+                else => return Error.UnexpectedToken,
+            };
 
-    //         inline for (info.fields, 0..) |field, i| {
-    //             if (mem.eql(u8, field_name, field.name)) {
-    //                 if (false) {} else {
-    //                     @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
-    //                 }
-    //                 fields_seen[i] = true;
+            inline for (info.fields, 0..) |field, i| {
+                if (mem.eql(u8, field_name, field.name)) {
+                    debug.assert(field.type != []u8);
 
-    //                 break;
-    //             }
-    //         } else {
-    //             if (options.ignore_unknown_fields) {
-    //                 try source.skipValue();
-    //             } else {
-    //                 return error.UnknownField;
-    //             }
-    //         }
-    //     }
-    //     try model.fillDefaultStructValues(@This(), &ret, &fields_seen);
-    //     return ret;
-    // }
+                    if (field.type == []const u8) {
+                        @field(ret, field.name) = try model.jsonParseAllocString(allocator, source, options);
+                    } else {
+                        @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
+                    }
+
+                    // @field(ret, field.name) = try json.innerParse(field.type, allocator, source, options);
+
+                    fields_seen[i] = true;
+                    break;
+                }
+            } else {
+                if (options.ignore_unknown_fields) {
+                    try source.skipValue();
+                } else {
+                    return error.UnknownField;
+                }
+            }
+        }
+        try model.fillDefaultStructValues(@This(), &ret, &fields_seen);
+        return ret;
+    }
 };
 
 // {

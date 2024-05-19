@@ -188,7 +188,7 @@ pub fn App(comptime config: AppConfig) type {
             if (self.authorized_once == false) {
                 @panic("Cannot refresh token without being authorized once.");
             }
-            try self._authorize();
+            try self.authorize();
         }
 
         fn authorize(self: *Self) !void {
@@ -302,10 +302,10 @@ pub fn Agent(comptime AppType: type, comptime optional_config: ?AgentBufferConfi
 
         const Self = @This();
 
-        const TokenBuffer = switch (config.token_options) {
-            .static => |size| StaticAllocBuffer(size),
-            .dynamic => DynamicAllocBuffer,
-        };
+        // const TokenBuffer = switch (config.token_options) {
+        //     .static => |size| StaticAllocBuffer(size),
+        //     .dynamic => DynamicAllocBuffer,
+        // };
 
         const ResponseInnerBuffer = switch (config) {
             .static => |size| struct {
@@ -370,9 +370,8 @@ pub fn Agent(comptime AppType: type, comptime optional_config: ?AgentBufferConfi
             return json.parseFromSlice(@TypeOf(context).Model, self.allocator, response.payload, .{
                 .ignore_unknown_fields = true,
                 .allocate = .alloc_always,
-
+                // .allocate = .alloc_if_needed,
                 // pub const AllocWhen = enum { alloc_if_needed, alloc_always };
-
             });
         }
 
@@ -396,101 +395,18 @@ pub fn Agent(comptime AppType: type, comptime optional_config: ?AgentBufferConfi
     };
 }
 
-const DummyAllocBuffer = struct {
-    fn ensureTotalCapacity(_: *@This(), _: Allocator, _: usize) Allocator.Error!void {}
-    fn allocAssumeCapacity(_: *@This(), source: []const u8) []u8 {
-        return source;
-    }
-    fn alloc(_: *@This(), _: Allocator, source: []const u8) Allocator.Error![]u8 {
-        return source;
-    }
-    fn allocPrintAssumeCapacity(_: *@This(), comptime _: []const u8, _: anytype) []u8 {
-        unreachable;
-    }
-    fn allocPrint(_: *@This(), _: Allocator, comptime _: []const u8, _: anytype) Allocator.Error![]u8 {
-        unreachable;
-    }
-    fn reset(_: *@This()) void {}
-    fn deinit(_: *@This(), _: Allocator) void {}
-};
-
-fn StaticAllocBuffer(comptime size: usize) type {
-    return struct {
-        buffer: [size]u8 = undefined,
-        pos: usize = 0,
-        fn ensureTotalCapacity(self: *@This(), _: Allocator, n: usize) Allocator.Error!void {
-            if (n <= self.buffer.len) return;
-            return Allocator.Error.OutOfMemory;
-        }
-        fn allocAssumeCapacity(self: *@This(), source: []const u8) []u8 {
-            defer self.pos += source.len;
-            const target = self.buffer[self.pos..][0..source.len];
-            @memcpy(target, source);
-            return target;
-        }
-        fn alloc(self: *@This(), _: Allocator, source: []const u8) Allocator.Error![]u8 {
-            self.ensureTotalCapacity(undefined, self.pos.source.len);
-            return self.allocAssumeCapacity(source);
-        }
-        fn allocPrintAssumeCapacity(self: *@This(), comptime format: []const u8, args: anytype) []u8 {
-            const buf = self.buffer[self.pos..];
-            const res = fmt.bufPrint(buf, format, args) catch @panic("out of memory");
-            defer self.pos += res.len;
-            return res;
-        }
-        fn allocPrint(self: *@This(), _: Allocator, comptime format: []const u8, args: anytype) Allocator.Error![]u8 {
-            const source_len = math.cast(usize, fmt.count(format, args)) orelse return Allocator.Error.OutOfMemory;
-            try self.ensureTotalCapacity(undefined, source_len);
-            return self.allocPrintAssumeCapacity(format, args);
-        }
-        fn reset(self: *@This()) void {
-            self.pos = 0;
-        }
-        fn deinit(_: *@This(), _: Allocator) void {}
-    };
-}
-
-const DynamicAllocBuffer = struct {
-    buffer: []u8 = undefined,
-    pos: usize = 0,
-    fn ensureTotalCapacity(self: *@This(), allocator: Allocator, n: usize) Allocator.Error!void {
-        if (n <= self.buffer.len) return;
-        self.buffer = try allocator.realloc(self.buffer, n);
-    }
-    fn allocAssumeCapacity(self: *@This(), source: []const u8) []u8 {
-        defer self.pos += source.len;
-        const target = self.buffer[self.pos..][0..source.len];
-        @memcpy(target, source);
-        return target;
-    }
-    fn alloc(self: *@This(), allocator: Allocator, source: []const u8) Allocator.Error![]u8 {
-        try self.ensureTotalCapacity(allocator, self.pos + source.len);
-        return self.allocAssumeCapacity(source);
-    }
-    fn allocPrintAssumeCapacity(self: *@This(), comptime format: []const u8, args: anytype) []u8 {
-        const buf = self.buffer[self.pos..];
-        const res = fmt.bufPrint(buf, format, args) catch @panic("out of memory");
-        defer self.pos += res.len;
-        return res;
-    }
-    fn allocPrint(self: *@This(), allocator: Allocator, comptime format: []const u8, args: anytype) Allocator.Error![]u8 {
-        const source_len = math.cast(usize, fmt.count(format, args)) orelse return Allocator.Error.OutOfMemory;
-        try self.ensureTotalCapacity(allocator, self.pos + source_len);
-        return self.allocPrintAssumeCapacity(format, args);
-    }
-    fn reset(self: *@This()) void {
-        self.pos = 0;
-    }
-    fn deinit(self: *@This(), allocator: Allocator) void {
-        allocator.free(self.buffer);
-    }
-};
-
 const print = std.debug.print;
+const json = std.json;
 
 const testOptions = @import("util.zig").testOptions;
 const TestOptions = @import("util.zig").TestOptions;
 // const parser = @import("parser.zig");
+
+const Thing = model.Thing;
+const Listing = model.Listing;
+const Link = model.Link;
+const Comment = model.Comment;
+const AccountMe = model.AccountMe;
 
 fn AppBuffer() type {
     return struct {
@@ -567,47 +483,82 @@ test "auth" {
     defer agent.deinit();
 
     {
-        const Context = api.AccountMe;
-        const parsed = try agent.fetch(Context{
-            // .limit = 9,
-            // .sr_detail = true,
-        });
-        parsed.deinit();
+        // const Context = api.AccountMe;
+        // const parsed = try agent.fetch(Context{
+        //     // .limit = 9,
+        //     // .sr_detail = true,
+        // });
+        // defer parsed.deinit();
 
-        const root = parsed.value;
+        // const root = parsed.value;
 
-        print("{any}\n", .{root});
+        // const pretty = try model.allocPrettyPrint(allocator, root);
+        // print("{s}\n", .{pretty});
+    }
+
+    {
+        // const parsed = blk: {
+        //     const Context = api.AccountMe;
+        //     const response = try agent.fetchBytes(Context{
+        //         // .limit = 9,
+        //         // .sr_detail = true,
+        //     });
+        //     defer response.deinit();
+
+        //     const parsed = try json.parseFromSlice(Context.Model, allocator, response.payload, .{
+        //         .ignore_unknown_fields = true,
+        //         // .allocate = .alloc_always,
+        //     });
+
+        //     break :blk parsed;
+        // };
+        // defer parsed.deinit();
+
+        // const pretty = try model.allocPrettyPrint(allocator, parsed.value);
+        // print("{s}\n", .{pretty});
     }
 
     {
         const Context = api.ListingNew("zig");
 
-        // const parsed = try agent.fetch(Context{
-        //     .limit = 9,
-        //     .sr_detail = true,
-        // });
-        // parsed.deinit();
-
-        // const root = parsed.value;
-
-        const response = try agent.fetchBytes(Context{
+        const parsed = try agent.fetch(Context{
             .limit = 9,
             .sr_detail = true,
         });
-        const parsed = try json.parseFromSlice(Thing, allocator, response.payload, .{
-            .ignore_unknown_fields = true,
-        });
+        defer parsed.deinit();
 
-        const children = parsed.value.listing.children;
-        for (children) |child_thing| {
-            const link = child_thing.link;
-            _ = link; // autofix
-            // print("{s}\n", .{link.selftext});
+        const pretty = try model.allocPrettyPrint(allocator, parsed.value);
+        print("{s}\n", .{pretty});
 
-            // print("{any}\n", .{@TypeOf(child_thing)});
-        }
+        // const children = parsed.value.listing.children;
+        // for (children) |child_thing| {
+        //     const link = child_thing.link;
+        //     _ = link; // autofix
+        //     // print("{s}\n", .{link.selftext});
+
+        //     // print("{any}\n", .{@TypeOf(child_thing)});
+        // }
 
         // print("{any}\n", .{root});
+    }
+
+    {
+        // const Context = api.ListingNew("zig");
+
+        // const response = try agent.fetchBytes(Context{
+        //     .limit = 9,
+        //     .sr_detail = true,
+        // });
+        // defer response.deinit();
+
+        // const parsed = try json.parseFromSlice(Thing, allocator, response.payload, .{
+        //     .ignore_unknown_fields = true,
+        //     // .allocate = .alloc_always,
+        // });
+
+        // const pretty = try model.allocPrettyPrint(allocator, parsed.value);
+        // print("{s}\n", .{pretty});
+
     }
 
     {
@@ -640,109 +591,4 @@ test "auth" {
         //     // print("{any}\n", .{@TypeOf(child_thing)});
         // }
     }
-}
-
-const json = std.json;
-
-const Thing = model.Thing;
-const Listing = model.Listing;
-const Link = model.Link;
-const Comment = model.Comment;
-
-test "test json" {
-    if (true) return error.SkipZigTest;
-
-    print("\n", .{});
-    const allocator = std.heap.page_allocator;
-
-    const s = @embedFile("testjson/listing_new.json");
-
-    const Value = std.json.Value;
-    const parsed = try json.parseFromSlice(Value, allocator, s, .{
-        .ignore_unknown_fields = true,
-    });
-
-    const root = parsed.value;
-
-    const kind = root.object.get("kind").?.string;
-    print("kind: {s}\n", .{kind});
-
-    const data = root.object.get("data").?.object;
-    print("data: {any}\n", .{data});
-
-    print("type: {}", .{@TypeOf(data)});
-
-    // const
-    // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
-
-    // const selftext = root.object.get("selftext").?;
-}
-
-test "test json static" {
-    if (true) return error.SkipZigTest;
-
-    print("\n", .{});
-    const allocator = std.heap.page_allocator;
-
-    const s = @embedFile("testjson/listing_new.json");
-
-    const parsed = try json.parseFromSlice(Thing(Listing), allocator, s, .{
-        .ignore_unknown_fields = true,
-    });
-    // print("{any}\n", .{parsed.value});
-
-    const listing = parsed.value;
-
-    const children = listing.data.children;
-
-    const c0 = children[0].data;
-    _ = c0; // autofix
-
-    // print("{s}\n", .{c0.url});
-    // print("{s}\n", .{c0.url.?});
-    // print("{s}\n", .{c0.author.?});
-    // print("{s}\n", .{c0.selftext.?});
-
-    // const
-    // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
-
-    // const selftext = root.object.get("selftext").?;
-}
-
-test "test json static comment" {
-    if (true) return error.SkipZigTest;
-
-    print("\n", .{});
-    const allocator = std.heap.page_allocator;
-
-    const s = @embedFile("testjson/comments2.json");
-
-    // const Model = struct {
-    //     Thing(Listing),
-    //     Thing(Comment),
-    // };
-
-    const Model = [2]Thing;
-
-    const parsed = try json.parseFromSlice(Model, allocator, s, .{
-        .ignore_unknown_fields = true,
-    });
-    // print("{any}\n", .{parsed.value});
-
-    const comments = parsed.value;
-    _ = comments; // autofix
-
-    // const children = listing.data.children;
-
-    // const c0 = children[0].data;
-
-    // print("{s}\n", .{c0.url});
-    // print("{s}\n", .{c0.url.?});
-    // print("{s}\n", .{c0.author.?});
-    // print("{s}\n", .{c0.selftext.?});
-
-    // const
-    // var scanner = JsonScanner.initCompleteInput(testing.allocator, "123");
-
-    // const selftext = root.object.get("selftext").?;
 }

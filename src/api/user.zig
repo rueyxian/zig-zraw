@@ -22,37 +22,23 @@ pub fn UserComments(comptime username: []const u8) type {
         limit: ?u64 = null,
         sr_detail: ?bool = null,
 
+        pub const Sort = enum { hot, new, top, controversial };
+        pub const T = enum { hour, day, week, month, year, all };
+        pub const Type = enum { link, comments };
+
         pub const url = domain_oauth ++ "user/" ++ username ++ "/comments";
         pub const method = Method.GET;
         pub const Model = Thing;
+
         pub usingnamespace api.MixinContexFetch(@This());
 
-        pub const Sort = enum {
-            hot,
-            new,
-            top,
-            controversial,
-        };
-        pub const T = enum {
-            hour,
-            day,
-            week,
-            month,
-            year,
-            all,
-        };
-        pub const Type = enum {
-            link,
-            comments,
-        };
-
-        /// WARNING: Not intended for use at the client level.
-        pub fn _writeParamValueContext(self: *const @This(), writer: anytype) !void {
-            const context = self.context orelse return;
-            if (context < 2 or context > 10) {
+        /// WARNING: Not intended for client-level use
+        pub fn writeParamValueContext(self: *const @This(), writer: anytype) !void {
+            const val = self.context orelse return;
+            if (val < 2 or val > 10) {
                 @panic("Param `context` must be in a range from 2 to 10");
             }
-            try writer.print("{}", .{context});
+            try writer.print("{}", .{val});
         }
     };
 }

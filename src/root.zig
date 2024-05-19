@@ -16,14 +16,13 @@ const zraw = @import("zraw");
 const cow = @import("cow");
 // const api = @import("api.zig");
 
-const uri_access_token = "https://www.reddit.com/api/v1/access_token";
-const uri_oauth_base = "https://oauth.reddit.com/";
+// const uri_access_token = "https://www.reddit.com/api/v1/access_token";
+// const uri_oauth_base = "https://oauth.reddit.com/";
 
-pub const Error = error{
-    HttpResponse,
-};
+pub const App = @import("app.zig").App;
+pub const AppConfig = @import("app.zig").AppConfig;
 
-const Number = u64;
+pub const api = @import("api.zig");
 
 // ==================================
 

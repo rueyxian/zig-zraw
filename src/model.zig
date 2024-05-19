@@ -1,6 +1,7 @@
 const std = @import("std");
 const debug = std.debug;
 const mem = std.mem;
+const fmt = std.fmt;
 const json = std.json;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
@@ -11,6 +12,8 @@ const Value = std.json.Value;
 const Token = std.json.Token;
 const TokenType = std.json.TokenType;
 const ParseError = std.json.ParseError;
+
+pub const AccountMe = @import("model/account.zig").AccountMe;
 
 pub const Int = i64;
 pub const Uint = u64;
@@ -91,7 +94,7 @@ fn ImplJsonParseEmptyStringAsNullFn(comptime T: type) type {
 }
 
 // NOTE stold from std/json/static.zig
-fn fillDefaultStructValues(comptime T: type, r: *T, fields_seen: *[@typeInfo(T).Struct.fields.len]bool) !void {
+pub fn fillDefaultStructValues(comptime T: type, r: *T, fields_seen: *[@typeInfo(T).Struct.fields.len]bool) !void {
     inline for (@typeInfo(T).Struct.fields, 0..) |field, i| {
         if (!fields_seen[i]) {
             if (field.default_value) |default_ptr| {
@@ -102,6 +105,14 @@ fn fillDefaultStructValues(comptime T: type, r: *T, fields_seen: *[@typeInfo(T).
             }
         }
     }
+}
+
+pub fn jsonParseAllocString(allocator: Allocator, source: anytype, _: ParseOptions) ![]const u8 {
+    const Error = ParseError(@TypeOf(source.*));
+    return switch (try source.nextAlloc(allocator, .alloc_always)) {
+        .allocated_string => |s| s,
+        else => Error.UnexpectedToken,
+    };
 }
 
 pub const SubredditType = enum {
@@ -284,41 +295,6 @@ pub const MediaMetadata = struct {
 pub fn jsonParseMediaMetadataSlice(allocator: Allocator, source: anytype, options: ParseOptions) ![]MediaMetadata {
     const Error = ParseError(@TypeOf(source.*));
 
-    // const value: Value = try json.innerParse(Value, allocator, source, options);
-    // // _ = value; // autofix
-    // // print("{any}\n", .{value});
-
-    // const obj_map: json.ObjectMap = switch (value) {
-    //     .object => |obj| obj,
-    //     else => Error.UnexpectedToken,
-    // };
-    // debug.assert(obj_map.count != 0);
-
-    // const ret = try std.ArrayList(MediaMetadata).initCapacity(allocator, obj_map.count);
-
-    // // const ret: *MediaMetadata = try allocator.alloc(MediaMetadata);
-    // // ret.ensureTotalCapacity(obj_map.count);
-    // var it_obj = obj_map.iterator();
-    // while (it_obj.next()) |e| {
-    //     const val = try json.innerParseFromValue(MediaMetadata, allocator, e.value_ptr.*, options);
-    //     // ret.putAssumeCapacityNoClobber(e.key_ptr.*, val);
-    //     ret.appendAssumeCapacity(val);
-    // }
-    // // return ret;
-    // return try ret.toOwnedSlice();
-
-    // ==========================
-
-    // const value: Value = try json.innerParse(Value, allocator, source, options);
-
-    // const obj_map: json.ObjectMap = switch (value) {
-    //     .object => |obj| obj,
-    //     else => Error.UnexpectedToken,
-    // };
-    // debug.assert(obj_map.count != 0);
-
-    // ==============================
-
     if (try source.next() != .object_begin) {
         return Error.UnexpectedToken;
     }
@@ -485,9 +461,13 @@ pub const Thing = union(enum) {
                 break :blk .{ .listing = try json.innerParse(Listing, allocator, source, options) };
             } else if (mem.eql(u8, kind_val, "more")) {
                 break :blk .{ .more = try json.innerParse(More, allocator, source, options) };
-            } else if (mem.eql(u8, kind_val, "t1")) {
+            }
+            //
+            else if (mem.eql(u8, kind_val, "t1")) {
                 break :blk .{ .comment = try json.innerParse(*Comment, allocator, source, options) };
-            } else if (mem.eql(u8, kind_val, "t2")) {
+            }
+            //
+            else if (mem.eql(u8, kind_val, "t2")) {
                 @panic("TODO");
             } else if (mem.eql(u8, kind_val, "t3")) {
                 break :blk .{ .link = try json.innerParse(Link, allocator, source, options) };
@@ -522,7 +502,7 @@ pub const Listing = struct {
     after: ?String,
     dist: ?Uint,
     modhash: ?String,
-    geo_filter: String,
+    // geo_filter: String,
     children: []Thing,
 };
 
@@ -826,111 +806,297 @@ pub const Comment = struct {
     }
 };
 
-const UserComment = struct {
-    //
-};
-
 const print = std.debug.print;
 
-test "asdf" {
-    if (true) return error.SkipZigTest;
+const PrettyOptions = struct {
+    indent_len: usize = 4,
+};
 
-    const allocator = std.heap.page_allocator;
-    {
-        var hm1 = std.StringHashMapUnmanaged(MediaMetadata){};
-        var hm2 = std.StringHashMap(MediaMetadata).init(allocator);
-        // var hm = std.StringArrayHashMapUnmanaged(usize){};
-        defer hm1.deinit(allocator);
-        defer hm2.deinit();
+const PrettyPrintState = struct {
+    name: ?[]const u8,
+    print_type: bool,
+    // line_break: bool,
+    depth: usize,
 
-        print("size usize: {any}\n", .{@sizeOf(usize)});
-        print("size hm1: {any}\n", .{@sizeOf(@TypeOf(hm1))});
-        print("size hm2: {any}\n", .{@sizeOf(@TypeOf(hm2))});
-
-        // print("cap: {any}\n", .{hm1.capacity()});
-
-        // try hm.ensureTotalCapacity(allocator, 4);
-        try hm1.ensureUnusedCapacity(allocator, 4);
-        try hm2.ensureUnusedCapacity(4);
-
-        print("size hm1: {any}\n", .{@sizeOf(@TypeOf(hm1))});
-        print("size hm2: {any}\n", .{@sizeOf(@TypeOf(hm2))});
-        // try hm.ensureTotalCapacity(4);
-        // try hm.ensure(allocator, 12);
+    fn setName(self: @This(), name: ?[]const u8) @This() {
+        var new_self = self;
+        new_self.name = name;
+        return new_self;
     }
 
-    {
-        const list = try std.ArrayList(usize).initCapacity(allocator, 3);
-        print("{}\n", .{list.capacity});
+    fn setPrintType(self: @This(), print_type: bool) @This() {
+        var new_self = self;
+        new_self.print_type = print_type;
+        return new_self;
     }
 
-    // print("cap: {any}\n", .{hm1.capacity()});
+    fn bumpDepth(self: @This()) @This() {
+        var new_self = self;
+        new_self.depth += 1;
+        return new_self;
+    }
+};
 
-    // hm.ensureTotalCapacityContext(, , )
-    // hm.ensureTotalCapacity(, )
+pub fn allocPrettyPrint(allocator: Allocator, value: anytype) ![]u8 {
+    var list = std.ArrayList(u8).init(allocator);
+    const state = PrettyPrintState{
+        .name = null,
+        .print_type = true,
+        .depth = 0,
+    };
+    const options = PrettyOptions{
+        .indent_len = 4,
+    };
+    try prettyPrint(value, options, state, list.writer());
 
-    // const link: Link = undefined;
-    // print("{any}\n", .{link.sr_detail});
-    // print("{any}\n", .{link.name});
+    return try list.toOwnedSlice();
 }
 
-test "customize json listing new" {
+fn prettyPrintString(value: anytype, options: PrettyOptions, state: PrettyPrintState, writer: anytype) @TypeOf(writer).Error!void {
+    switch (@typeInfo(@TypeOf(value))) {
+        .Pointer => |ptr_info| {
+            debug.assert(ptr_info.child == u8);
+        },
+        else => unreachable,
+    }
+    const padding = options.indent_len * state.depth;
+    for (value) |byte| {
+        try writer.writeByte(byte);
+        if (byte == '\n') {
+            try writer.writeByteNTimes(' ', padding + if (state.name) |nm| nm.len + 2 else 0);
+        }
+    }
+}
+
+fn prettyPrint(value: anytype, options: PrettyOptions, state: PrettyPrintState, writer: anytype) @TypeOf(writer).Error!void {
+    const T = @TypeOf(value);
+
+    const padding = options.indent_len * state.depth;
+
+    // const cgreen = "\x1b[32m";
+    // _ = cgreen; // autofix
+    const ccyan = "\x1b[36m";
+    // const cmagenta = "\x1b[35m";
+    const creset = "\x1b[0m";
+
+    const type_name = ccyan ++ @typeName(T) ++ creset;
+
+    try writer.writeByteNTimes(' ', padding);
+    if (state.name) |name| {
+        try writer.print(".{s}: ", .{name});
+    }
+    if (state.print_type) {
+        try writer.print("{s} = ", .{type_name});
+    }
+
+    try prettyPrintValue(value, options, state, writer);
+
+    try writer.print(", ", .{});
+
+    try writer.print("\n", .{});
+}
+
+fn prettyPrintValue(value: anytype, options: PrettyOptions, state: PrettyPrintState, writer: anytype) @TypeOf(writer).Error!void {
+    const T = @TypeOf(value);
+
+    const padding = options.indent_len * state.depth;
+
+    const cgreen = "\x1b[32m";
+    const ccyan = "\x1b[36m";
+    const cmagenta = "\x1b[35m";
+    const creset = "\x1b[0m";
+
+    const type_name = ccyan ++ @typeName(T) ++ creset;
+    _ = type_name; // autofix
+
+    switch (@typeInfo(T)) {
+        .Void => |_| {
+            try writer.print("{s}", .{cmagenta});
+            try writer.print("{{}}", .{});
+            try writer.print("{s}", .{creset});
+        },
+        .Optional => |_| {
+            if (value) |payload| {
+                try prettyPrintValue(payload, options, state, writer);
+            } else {
+                try writer.print("{s}", .{cmagenta});
+                try writer.print("null", .{});
+                try writer.print("{s}", .{creset});
+            }
+        },
+        .Pointer => |ptr_info| {
+            switch (ptr_info.size) {
+                .Slice => {
+                    //
+                    if (ptr_info.child == u8) {
+                        try writer.print("{s}", .{cgreen});
+                        try writer.print("\"", .{});
+
+                        for (value) |byte| {
+                            try writer.writeByte(byte);
+                            if (byte == '\n') {
+                                var total_padding = padding;
+                                if (state.name) |nm| total_padding += nm.len + 3;
+                                if (state.print_type) total_padding += @typeName(T).len + 4;
+                                try writer.writeByteNTimes(' ', total_padding);
+                            }
+                        }
+
+                        try writer.print("\"", .{});
+                        try writer.print("{s}", .{creset});
+                    } else {
+                        //
+                        try writer.print("[\n", .{});
+                        for (value) |val| {
+                            try prettyPrint(val, options, state.bumpDepth(), writer);
+                        }
+
+                        try writer.writeByteNTimes(' ', padding);
+                        try writer.writeByte(']');
+                    }
+                },
+                else => {
+                    // try writer.print("{s} = {s}{any}{s}", .{ type_name, cmagenta, value, creset });
+
+                    // try writer.print("{s}", .{cmagenta});
+                    try prettyPrintValue(value.*, options, state, writer);
+                    // try writer.print("{s}", .{creset});
+                },
+            }
+        },
+        .Array => |_| {
+            try writer.print("[\n", .{});
+            for (value) |child| {
+                try prettyPrint(child, options, state.bumpDepth().setName(null), writer);
+            }
+            try writer.writeByteNTimes(' ', padding);
+            try writer.writeByte(']');
+        },
+        .Union => |union_info| {
+            // print("{s}{s}: {s} = {{\n", .{ padding, name, type_name });
+            try writer.print("{{\n", .{});
+
+            const tagname = @tagName(value);
+            inline for (union_info.fields) |field| {
+                if (mem.eql(u8, tagname, field.name)) {
+                    try prettyPrint(@field(value, field.name), options, state.bumpDepth().setName(field.name), writer);
+                    break;
+                }
+            }
+
+            try writer.writeByteNTimes(' ', padding);
+            try writer.writeByte('}');
+        },
+        .Struct => |struct_info| {
+            try writer.print("{{\n", .{});
+
+            inline for (struct_info.fields) |field| {
+                try prettyPrint(@field(value, field.name), options, state.bumpDepth().setName(field.name), writer);
+            }
+
+            try writer.writeByteNTimes(' ', padding);
+            try writer.writeByte('}');
+        },
+        else => {
+            try writer.print("{s}", .{cmagenta});
+            try writer.print("{any}", .{value});
+            try writer.print("{s}", .{creset});
+        },
+    }
+}
+
+test "asaoieud" {
     if (true) return error.SkipZigTest;
     print("\n", .{});
 
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+
+    const Qux = union(enum) {
+        aa: ?usize,
+        bb: []const u8,
+        cc: void,
+    };
+
+    const Baz = struct {
+        pos: struct {
+            x: i32,
+            y: i32,
+        },
+        loc: []const u8,
+    };
+
+    const Foo = struct {
+        names: [3][]const u8,
+        qux: Qux,
+
+        maybe: ?u32,
+        maybe_maybe: ?[]const u8,
+        slice_of_qux: []Qux,
+        slice_of_nums: []i32,
+        slice_of_baz: []Baz,
+        text: []const u8,
+    };
+
+    var slice_of_qux = try allocator.alloc(Qux, 3);
+    slice_of_qux[0] = Qux{ .aa = null };
+    slice_of_qux[1] = Qux{ .bb = "meh" };
+    slice_of_qux[2] = Qux.cc;
+
+    var slice_of_baz = try allocator.alloc(Baz, 3);
+    slice_of_baz[0] = Baz{ .pos = .{ .x = 12, .y = -34 }, .loc = "terra" };
+    slice_of_baz[1] = Baz{ .pos = .{ .x = -9, .y = 123 }, .loc = "inferno" };
+    slice_of_baz[2] = Baz{ .pos = .{ .x = 1, .y = 99 }, .loc = "andromeda" };
+
+    var nums = [_]i32{ 4, 97, 42, 32 };
+
+    const foo = Foo{
+        .names = .{ "spell breaker", "obsidian destoryer", "shaman" },
+        .qux = Qux{ .aa = 42 },
+        .maybe = null,
+        .maybe_maybe = "maybe not",
+        .slice_of_qux = slice_of_qux,
+        .slice_of_nums = &nums,
+        .slice_of_baz = slice_of_baz,
+        .text = "To: uwu\nHello, how are you?\nI'm fine thank you and you?",
+    };
+
+    const pretty = try allocPrettyPrint(allocator, foo);
+    print("{s}\n", .{pretty});
+}
+
+test "listing  new" {
+    if (true) return error.SkipZigTest;
+    print("\n", .{});
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    // const allocator = std.heap.page_allocator;
     // const allocator = std.testing.allocator;
 
-    // const s = @embedFile("testjson/listing_comment_author_deleted.json");
-    const s = @embedFile("testjson/listing_new_dota2.json");
-    // const s = @embedFile("testjson/listing_new_zig.json");
-    // const s = @embedFile("testjson/listing_new.json");
-    // const s = @embedFile("testjson/listing_new3.json");
-    // const s = @embedFile("testjson/listing_new2.json");
+    const parsed = blk: {
 
-    const parsed = try json.parseFromSlice(Thing, allocator, s, .{
-        .ignore_unknown_fields = true,
-    });
+        // const file = @embedFile("testjson/listing_comment_author_deleted.json");
+        // const file = @embedFile("testjson/listing_new_dota2.json");
+        // const file = @embedFile("testjson/listing_new_zig_short.json");
+        const file = @embedFile("testjson/listing_new_zig.json");
+        // const file = @embedFile("testjson/listing_new3.json");
+        // const file = @embedFile("testjson/listing_new_simple.json");
+
+        const s = try allocator.dupe(u8, file);
+        defer allocator.free(s);
+
+        const parsed = try json.parseFromSlice(Thing, allocator, s, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        });
+        break :blk parsed;
+    };
     defer parsed.deinit();
 
     // print("{any}\n", .{parsed.value});
-
-    const children = parsed.value.listing.children;
-    for (children) |thing| {
-        const link = thing.link;
-        print("title: {s}\n", .{link.title});
-        // print("title: {any}\n", .{link.subreddit_type});
-        // print("link flair type: {s}\n", .{link.link_flair_richtext});
-        // print("sr type: {s}\n", .{link.sr_detail.?.subreddit_type});
-        // print("sr_detail: {any}\n", .{link.sr_detail});
-
-        // print("media embed: {any}\n", .{link.media_embed});
-
-        // for (link.author_flair_richtext) |flair| {
-        //     switch (flair) {
-        //         .emoji => |e| {
-        //             print("{s}\n", .{e.award});
-        //             print("{s}\n", .{e.url});
-        //             print("\n", .{});
-        //         },
-        //         .text => |t| {
-        //             print("{s}\n", .{t});
-        //             print("\n", .{});
-        //         },
-        //     }
-        // }
-
-        // link.media_metadata
-        // if (link.media_metadata) |metadata| {
-        //     for (metadata) |mt| {
-        //         print("{any}\n", .{mt});
-        //     }
-
-        // } else {
-        // }
-
-        print("==================\n", .{});
-    }
+    const pretty = try allocPrettyPrint(allocator, parsed.value);
+    print("{s}\n", .{pretty});
 }
 
 test " json user comments" {
@@ -938,148 +1104,86 @@ test " json user comments" {
 
     print("\n", .{});
 
-    const allocator = std.heap.page_allocator;
-    // const allocator = std.testing.allocator;
+    // const allocator = std.heap.page_allocator;
+    const allocator = std.testing.allocator;
 
-    // const s = @embedFile("testjson/user_comment.json");
-    const s = @embedFile("testjson/user_comment_spez.json");
-    // const s = @embedFile("testjson/listing_comment_author_deleted.json");
+    const parsed = blk: {
+        const file = @embedFile("testjson/user_comment_spez.json");
 
-    const Model = Thing;
-    // _ = Model; // autofix
+        const s = try allocator.dupe(u8, file);
+        defer allocator.free(s);
 
-    // const parsed = try json.parseFromSlice(JsonValue, allocator, s, .{
-    const parsed = try json.parseFromSlice(Model, allocator, s, .{
-        .ignore_unknown_fields = true,
-    });
-    // const root = parsed.value;
+        const parsed = try json.parseFromSlice(Thing, allocator, s, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        });
+        break :blk parsed;
+    };
+    defer parsed.deinit();
 
-    const root = parsed.value;
-
-    print("#######################\n", .{});
-
-    // print("{any}\n", .{root[0]});
-    // print("{any}\n", .{root[1]});
-
-    {
-        const comment_children = root.listing.children;
-
-        for (comment_children) |child| {
-            const comment = child.comment;
-            print("{s}\n", .{comment.body});
-            // print("{s}\n", .{comment.author});
-
-            // for (comment.replies)
-            // if (comment.replies) |replies_thing| {
-            //     const reply_children = replies_thing.listing.children;
-            //     // print("   {any}\n", .{replies_thing});
-
-            //     for (reply_children) |reply| {
-            //         const comment2 = reply.comment;
-            //         _ = comment2; // autofix
-
-            //         // print("      {s}\n", .{comment2.author});
-            //     }
-            // }
-        }
-    }
-
-    // recurPrintComments(root[1], 0);
+    const pretty = try allocPrettyPrint(allocator, parsed.value);
+    defer allocator.free(pretty);
+    print("{s}\n", .{pretty});
 }
 
-test " json listing comments" {
-    if (true) return error.SkipZigTest;
+test "account me" {
+    // if (true) return error.SkipZigTest;
 
     print("\n", .{});
 
     const allocator = std.heap.page_allocator;
     // const allocator = std.testing.allocator;
 
-    // const s = @embedFile("testjson/comments.json");
-    const s = @embedFile("testjson/comments4_metadata.json");
-    // const s = @embedFile("testjson/listing_comment_author_deleted.json");
+    const parsed = blk: {
+        const file = @embedFile("testjson/me.json");
 
-    const Model = [2]Thing;
-    // _ = Model; // autofix
+        const s = try allocator.dupe(u8, file);
+        defer allocator.free(s);
 
-    // const parsed = try json.parseFromSlice(JsonValue, allocator, s, .{
-    const parsed = try json.parseFromSlice(Model, allocator, s, .{
-        .ignore_unknown_fields = true,
-    });
-    // const root = parsed.value;
+        const Model = AccountMe;
+        const parsed = try json.parseFromSlice(Model, allocator, s, .{
+            .ignore_unknown_fields = true,
+            // .allocate = .alloc_always,
+        });
+        break :blk parsed;
+    };
+    defer parsed.deinit();
 
     const root = parsed.value;
 
-    print("#######################\n", .{});
-    print("#######################\n", .{});
-
-    // print("{any}\n", .{root[0]});
-    // print("{any}\n", .{root[1]});
-
-    {
-        const link_children = root[0].listing.children;
-        _ = link_children; // autofix
-    }
-
-    recurPrintComments(root[1], 0);
+    const pretty = try allocPrettyPrint(allocator, root);
+    print("{s}\n", .{pretty});
 }
 
-fn recurPrintComments(thing: Thing, level: usize) void {
-    //
+test " json listing comments" {
+    // if (true) return error.SkipZigTest;
 
-    const children = thing.listing.children;
+    print("\n", .{});
 
-    const padding = "  > ";
+    const allocator = std.heap.page_allocator;
+    // const allocator = std.testing.allocator;
 
-    for (children) |child| {
-        switch (child) {
-            .comment => |comment| {
-                // for (0..level) |_| print("{s}", .{padding});
+    // const parsed = try json.parseFromSlice(JsonValue, allocator, s, .{
+    const parsed = blk: {
+        const file = @embedFile("testjson/comments.json");
+        // const file = @embedFile("testjson/comments4_metadata.json");
+        // const file = @embedFile("testjson/listing_comment_author_deleted.json");
 
-                print("{s}: ", .{comment.author});
-                print("{s}\n", .{comment.body});
+        const s = try allocator.dupe(u8, file);
+        defer allocator.free(s);
 
-                // print("\n", .{});
+        const Model = [2]Thing;
 
-                // for (0..level) |_| print("{s}", .{padding});
+        const parsed = try json.parseFromSlice(Model, allocator, s, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        });
+        break :blk parsed;
+    };
+    defer parsed.deinit();
 
-                // // print("----------\n", .{});
+    const root = parsed.value;
 
-                // if (comment.replies) |reply| {
-                //     recurPrintComments(reply, level + 1);
-                // }
-
-                // print("{}\n", .{comment.media_metadata});
-
-                if (comment.media_metadata) |metadata| {
-                    // print("{}\n", .{metadata});
-                    for (metadata) |mt| {
-                        print("{any}\n", .{mt});
-                        //
-                    }
-                }
-            },
-            .more => |more| {
-                //
-
-                for (0..level) |_| print("{s}", .{padding});
-
-                print("more: \n", .{});
-
-                for (more.children) |reply| {
-                    print("{s}, ", .{reply});
-                }
-
-                print("\n", .{});
-
-                for (0..level) |_| print("{s}", .{padding});
-
-                // print("----------\n", .{});
-            },
-            else => unreachable,
-        }
-    }
-
-    for (0..level) |_| print("{s}", .{padding});
-    print("-------------\n", .{});
+    const pretty = try allocPrettyPrint(allocator, root);
+    print("{s}\n", .{pretty});
 }
