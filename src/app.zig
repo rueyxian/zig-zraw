@@ -256,34 +256,8 @@ pub fn App(comptime config: AppConfig) type {
             if (self.token == null) @panic("Not yet authorize");
             return Agent(Self, optional_agent_buffer_config).init(self.allocator, self);
         }
-
-        // pub fn agent_unmanaged(self: *Self, comptime agent_config: AgentConfig) AgentUnmanaged(Self, agent_config) {
-        //     if (self.token_generation == 0) unreachable;
-
-        //     return AgentUnmanaged(Self, agent_config).init(self.allocator, &self);
-        // }
-
-        // pub fn getAuthorization(self: *const Self) Error![]const u8 {
-        //     const token = self.token orelse return Error.NoToken;
-        //     return token.authorization;
-        // }
-
-        // pub fn writeAuthorization(self: *const Self) []const u8 {
-        //     const token = self.token orelse return Error.NoToken;
-        //     return token.authorization;
-        // }
     };
 }
-
-// pub const AgentConfig = struct {
-//     token_options: BufferOptions = BufferOptions.dynamic,
-//     response_buffer_options: BufferOptions = BufferOptions.dynamic,
-
-//     pub const BufferOptions = union(enum) {
-//         static: usize,
-//         dynamic,
-//     };
-// };
 
 pub const AgentBufferConfig = union(enum) {
     static: usize,
