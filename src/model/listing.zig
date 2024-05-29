@@ -5,7 +5,6 @@ const mem = std.mem;
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const ParseOptions = std.json.ParseOptions;
-
 const ParseError = std.json.ParseError;
 
 const model = @import("../model.zig");
@@ -106,8 +105,8 @@ pub const Listing = struct {
     before: ?String,
     after: ?String,
     dist: ?Uint,
-    modhash: ?String,
-    // geo_filter: String,
+    // modhash: ?String, // NOTE: unimplemented
+    // geo_filter: String, // NOTE: unimplemented
     children: []Thing,
 };
 

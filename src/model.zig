@@ -7,10 +7,11 @@ const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const ParseOptions = std.json.ParseOptions;
 const Value = std.json.Value;
-const Token = std.json.Token;
 const TokenType = std.json.TokenType;
 const ParseError = std.json.ParseError;
 
+pub const Token = @import("model/auth.zig").Token;
+pub const Scope = @import("model/auth.zig").Scope;
 pub const AccountMe = @import("model/account.zig").AccountMe;
 pub const Thing = @import("model/listing.zig").Thing;
 pub const Listing = @import("model/listing.zig").Listing;
@@ -458,8 +459,36 @@ test "asaoieud" {
     print("{s}\n", .{pretty});
 }
 
+test "access token" {
+    if (true) return error.SkipZigTest;
+    print("\n", .{});
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    // const allocator = std.heap.page_allocator;
+    // const allocator = std.testing.allocator;
+
+    const parsed = blk: {
+        const file = @embedFile("testjson/access_token.json");
+
+        const s = try allocator.dupe(u8, file);
+        defer allocator.free(s);
+
+        const parsed = try json.parseFromSlice(Token, allocator, s, .{
+            .ignore_unknown_fields = true,
+            .allocate = .alloc_always,
+        });
+        break :blk parsed;
+    };
+    defer parsed.deinit();
+
+    // print("{any}\n", .{parsed.value});
+    const pretty = try allocPrettyPrint(allocator, parsed.value);
+    print("{s}\n", .{pretty});
+}
+
 test "listing  new" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
     print("\n", .{});
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -493,7 +522,7 @@ test "listing  new" {
 }
 
 test " json user comments" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     print("\n", .{});
 
@@ -520,7 +549,7 @@ test " json user comments" {
 }
 
 test "account me" {
-    // if (true) return error.SkipZigTest;
+    if (true) return error.SkipZigTest;
 
     print("\n", .{});
 

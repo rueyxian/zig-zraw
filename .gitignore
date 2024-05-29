@@ -5,3 +5,5 @@ zig-cache
 
 .authpath
 testjson
+testserver.zig
+draft.zig

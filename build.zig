@@ -46,7 +46,27 @@ pub fn build(b: *std.Build) !void {
     });
     _ = mod_zraw;
 
-    // mod_z
+    // const mod_api = b.addModule("api", .{
+    //     .root_source_file = .{ .path = "src/api.zig" },
+    // });
+
+    {
+        // NOTE: TESTING
+        // const unit_tests = b.addTest(.{
+        //     .root_source_file = .{ .path = "src/api/submission.zig" },
+        //     .target = target,
+        //     .optimize = optimize,
+        // });
+
+        // unit_tests.root_module.addAnonymousImport("CowString", .{ .root_source_file = b.path("src/CowString.zig") });
+
+        // const run_unit_tests = b.addRunArtifact(unit_tests);
+
+        // const step_test = b.step("test_api_submission", "test api/submission.zig");
+        // step_test.dependOn(&run_unit_tests.step);
+    }
+
+    // ==================================================
 
     const AddTest = struct {
         path: []const u8,
@@ -57,7 +77,8 @@ pub fn build(b: *std.Build) !void {
 
     const add_tests_list = [_]AddTest{
         .{ .path = "src/root.zig", .imports = &.{import_test_zon} },
-        .{ .path = "src/fetch.zig", .imports = &.{import_cow} },
+        // .{ .path = "src/fetch.zig", .imports = &.{import_cow} },
+        // .{ .path = "src/api/submission.zig", .imports = &.{ } }
     };
 
     for (&add_tests_list) |opts| {
@@ -76,6 +97,8 @@ pub fn build(b: *std.Build) !void {
 
         run_unit_tests.step.dependOn(b.getInstallStep());
     }
+
+    // ==================================================
 
     // {
     //     const unit_tests = b.addTest(.{

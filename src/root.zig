@@ -12,7 +12,7 @@ const Method = std.http.Method;
 
 // const test_zon = @import("test_zon");
 
-const zraw = @import("zraw");
+// const zraw = @import("zraw");
 const cow = @import("cow");
 // const api = @import("api.zig");
 
@@ -23,6 +23,10 @@ pub const App = @import("app.zig").App;
 pub const AppConfig = @import("app.zig").AppConfig;
 
 pub const api = @import("api.zig");
+
+pub const model = @import("model.zig");
+
+pub const ConfidentialAuthenticator = @import("auth.zig").ConfidentialAuthenticator;
 
 // ==================================
 
